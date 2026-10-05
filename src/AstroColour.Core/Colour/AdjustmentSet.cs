@@ -1,0 +1,110 @@
+using System.Runtime.CompilerServices;
+
+namespace AstroColour.Core.Colour;
+
+/// <summary>
+/// A snapshot of adjustments prepared for fast per-pixel evaluation: each adjustment's hue
+/// weight is tabulated, and a combined table lets unselected pixels be rejected cheaply.
+/// </summary>
+public sealed class AdjustmentSet
+{
+    private const int Bins = 720; // half-degree bins, interpolated
+
+    private readonly Entry[] _entries;
+    private readonly bool[] _anySelected; // bin i: does any adjustment select hues in [i, i+1]?
+
+    private readonly record struct Entry(float[] HueWeights, float ChromaEdge, float HueShift, float Saturation, float Lightness);
+
+    /// <param name="adjustments">Adjustments to include; disabled or no-op ones are skipped unless <paramref name="includeAll"/>.</param>
+    /// <param name="includeAll">Include every adjustment, e.g. to evaluate a selection mask.</param>
+    public AdjustmentSet(IEnumerable<ColourAdjustment> adjustments, bool includeAll = false)
+    {
+        _entries = adjustments
+            .Where(a => includeAll || (a.Enabled && a.HasEdits))
+            .Select(a => new Entry(HueTable(a), a.NeutralProtection / 100f, a.HueShift, a.Saturation / 100f, a.Lightness / 100f))
+            .ToArray();
+
+        _anySelected = new bool[Bins];
+        foreach (var e in _entries)
+            for (int i = 0; i < Bins; i++)
+                _anySelected[i] |= e.HueWeights[i] > 0f || e.HueWeights[i + 1] > 0f;
+    }
+
+    public bool IsEmpty => _entries.Length == 0;
+
+    private static float[] HueTable(ColourAdjustment a)
+    {
+        var table = new float[Bins + 1];
+        var unprotected = a.Clone();
+        unprotected.NeutralProtection = 0;
+        for (int i = 0; i <= Bins; i++)
+            table[i] = unprotected.Weight(i * (360f / Bins), 1f);
+        return table;
+    }
+
+    /// <summary>Selection weight (0..1) of the first adjustment for a pixel's hue and chroma.</summary>
+    public float Weight(float hue, float chroma) => _entries.Length == 0 ? 0f : Weight(_entries[0], hue, chroma);
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static float Weight(in Entry e, float hue, float chroma)
+    {
+        float pos = hue * (Bins / 360f);
+        int i = (int)pos;
+        if ((uint)i >= Bins) i = Bins - 1;
+        float frac = pos - i;
+        float w = e.HueWeights[i] + (e.HueWeights[i + 1] - e.HueWeights[i]) * frac;
+        if (w <= 0f || e.ChromaEdge <= 0f) return w;
+        float t = Math.Clamp(chroma / e.ChromaEdge, 0f, 1f);
+        return w * t * t * (3f - 2f * t);
+    }
+
+    /// <summary>
+    /// Applies the adjustments to one pixel. Each adjustment's weight is measured against the
+    /// pixel's original colour, so overlapping ranges combine rather than chain.
+    /// Returns false (leaving the pixel untouched) if no adjustment selects it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public bool Adjust(ref float r, ref float g, ref float b)
+    {
+        if (_entries.Length == 0) return false;
+
+        float cr = Math.Clamp(r, 0f, 1f), cg = Math.Clamp(g, 0f, 1f), cb = Math.Clamp(b, 0f, 1f);
+        float max = MathF.Max(cr, MathF.Max(cg, cb));
+        float min = MathF.Min(cr, MathF.Min(cg, cb));
+        float chroma = max - min;
+        if (chroma <= 1e-7f) return false;
+
+        float h;
+        if (max == cr) h = (cg - cb) / chroma + (cg < cb ? 6f : 0f);
+        else if (max == cg) h = (cb - cr) / chroma + 2f;
+        else h = (cr - cg) / chroma + 4f;
+        h *= 60f;
+
+        int bin = (int)(h * (Bins / 360f));
+        if ((uint)bin >= Bins) bin = Bins - 1;
+        if (!_anySelected[bin]) return false;
+
+        float dh = 0f, ds = 0f, dl = 0f;
+        bool selected = false;
+        foreach (ref readonly var e in _entries.AsSpan())
+        {
+            float w = Weight(e, h, chroma);
+            if (w <= 0f) continue;
+            selected = true;
+            dh += w * e.HueShift;
+            ds += w * e.Saturation;
+            dl += w * e.Lightness;
+        }
+        if (!selected) return false;
+
+        float l = (max + min) * 0.5f;
+        float s = l > 0.5f ? chroma / (2f - max - min) : chroma / (max + min);
+        ds = Math.Clamp(ds, -1f, 1f);
+        dl = Math.Clamp(dl, -1f, 1f);
+
+        float newS = Math.Clamp(s * (1f + ds), 0f, 1f);
+        float newL = dl >= 0f ? l + (1f - l) * dl * 0.5f : l * (1f + dl * 0.5f);
+        ColourMath.HslToRgb(h + dh, newS, Math.Clamp(newL, 0f, 1f), out r, out g, out b);
+        return true;
+    }
+}

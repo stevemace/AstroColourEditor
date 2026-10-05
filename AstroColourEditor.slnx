@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AstroColour.App/AstroColour.App.csproj" />
+    <Project Path="src/AstroColour.Core/AstroColour.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AstroColour.Tests/AstroColour.Tests.csproj" />
+  </Folder>
+</Solution>

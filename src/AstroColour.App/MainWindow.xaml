@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="AstroColour.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:AstroColour.App"
+    xmlns:controls="using:AstroColour.App.Controls"
+    Title="Astro Colour Editor">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <CommandBar x:Name="Toolbar" Grid.Row="0" HorizontalAlignment="Left" DefaultLabelPosition="Right"
+                    IsDynamicOverflowEnabled="False" Background="Transparent">
+            <AppBarButton Icon="OpenFile" Label="Open" Click="Open_Click" ToolTipService.ToolTip="Open an XISF image (Ctrl+O)">
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Modifiers="Control" Key="O" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
+            <AppBarButton x:Name="SaveButton" Icon="Save" Label="Save" Click="Save_Click" ToolTipService.ToolTip="Save over the current file (Ctrl+S)">
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Modifiers="Control" Key="S" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
+            <AppBarButton x:Name="SaveAsButton" Icon="SaveLocal" Label="Save as" Click="SaveAs_Click" ToolTipService.ToolTip="Save to a new file (Ctrl+Shift+S)">
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Modifiers="Control,Shift" Key="S" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
+            <AppBarSeparator />
+            <AppBarButton x:Name="FitButton" Label="Fit" Click="Fit_Click" ToolTipService.ToolTip="Fit the image to the window (Ctrl+0)">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE9A6;" />
+                </AppBarButton.Icon>
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Modifiers="Control" Key="Number0" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
+            <AppBarButton x:Name="ActualSizeButton" Label="100%" Click="ActualSize_Click" ToolTipService.ToolTip="View at actual pixels (Ctrl+1)">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xE71E;" />
+                </AppBarButton.Icon>
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Modifiers="Control" Key="Number1" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
+            <AppBarSeparator />
+            <AppBarToggleButton x:Name="CompareButton" Label="Before" Click="Compare_Click" ToolTipService.ToolTip="Show the original, unedited image (B)">
+                <AppBarToggleButton.Icon>
+                    <FontIcon Glyph="&#xE7B3;" />
+                </AppBarToggleButton.Icon>
+                <AppBarToggleButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Key="B" />
+                </AppBarToggleButton.KeyboardAccelerators>
+            </AppBarToggleButton>
+        </CommandBar>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="340" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Image -->
+            <Grid Grid.Column="0" Background="#FF141414">
+                <ScrollViewer x:Name="Viewer" ZoomMode="Enabled" MinZoomFactor="0.1" MaxZoomFactor="32"
+                              HorizontalScrollMode="Enabled" VerticalScrollMode="Enabled"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                              ViewChanged="Viewer_ViewChanged" SizeChanged="Viewer_SizeChanged">
+                    <controls:CursorGrid x:Name="ImageHost" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                         Background="Transparent"
+                                         PointerPressed="ImageHost_PointerPressed"
+                                         PointerMoved="ImageHost_PointerMoved"
+                                         PointerReleased="ImageHost_PointerReleased"
+                                         PointerCaptureLost="ImageHost_PointerCaptureLost"
+                                         PointerExited="ImageHost_PointerExited"
+                                         PointerWheelChanged="ImageHost_PointerWheelChanged">
+                        <Image x:Name="PreviewImage" Stretch="Fill" />
+                    </controls:CursorGrid>
+                </ScrollViewer>
+
+                <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                    <FontIcon Glyph="&#xE91B;" FontSize="48" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <TextBlock Text="Open a PixInsight XISF image to begin" Foreground="#FFB0B0B0" HorizontalAlignment="Center" />
+                    <Button Content="Open image…" HorizontalAlignment="Center" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" />
+                </StackPanel>
+
+                <StackPanel VerticalAlignment="Top" Margin="12" Spacing="8">
+                    <InfoBar x:Name="LinearInfo" Severity="Warning" IsOpen="False" Title="This image looks linear (unstretched)"
+                             Message="Colour editing works best on a stretched, non-linear image. Stretch it in PixInsight first for reliable colour selection." />
+                    <InfoBar x:Name="MessageInfo" IsOpen="False" />
+                </StackPanel>
+
+                <Grid x:Name="BusyOverlay" Background="#80000000" Visibility="Collapsed">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                        <ProgressRing IsActive="True" Width="48" Height="48" />
+                        <TextBlock x:Name="BusyText" Foreground="White" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- Colour editor panel -->
+            <Border Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,0,0,0">
+                <ScrollViewer x:Name="PanelScroller" VerticalScrollBarVisibility="Auto" IsEnabled="False">
+                    <StackPanel Padding="16" Spacing="12">
+                        <TextBlock Text="Colour editor" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                        <ToggleButton x:Name="PickerButton" HorizontalAlignment="Stretch" Click="Picker_Click"
+                                      ToolTipService.ToolTip="Pick a colour from the image (P)">
+                            <ToggleButton.KeyboardAccelerators>
+                                <KeyboardAccelerator Key="P" />
+                            </ToggleButton.KeyboardAccelerators>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xEF3C;" FontSize="16" />
+                                <TextBlock Text="Pick colour from image" />
+                            </StackPanel>
+                        </ToggleButton>
+                        <TextBlock x:Name="PickerHint" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="Turn on the picker, then click a colour in the image to add it to the list. Drag to pan, scroll to zoom." />
+
+                        <ListView x:Name="AdjustmentList" SelectionMode="Single" MaxHeight="240"
+                                  SelectionChanged="AdjustmentList_SelectionChanged">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="local:AdjustmentItem">
+                                    <Grid ColumnSpacing="10" Padding="0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="22" Height="22" CornerRadius="11" VerticalAlignment="Center"
+                                                Background="{x:Bind Swatch, Mode=OneWay}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind Name, Mode=OneWay}" />
+                                            <TextBlock Text="{x:Bind Summary, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <CheckBox Grid.Column="2" MinWidth="0" Padding="0" VerticalAlignment="Center"
+                                                  IsChecked="{x:Bind IsActive, Mode=TwoWay}"
+                                                  ToolTipService.ToolTip="Enable or disable this adjustment" />
+                                        <Button Grid.Column="3" Padding="6" VerticalAlignment="Center" Background="Transparent" BorderThickness="0"
+                                                Tag="{x:Bind}" Click="DeleteAdjustment_Click" ToolTipService.ToolTip="Remove">
+                                            <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+
+                        <StackPanel x:Name="EditorPanel" Spacing="4" Visibility="Collapsed">
+                            <Grid Margin="0,4,0,4">
+                                <TextBlock Text="Adjust" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                                <HyperlinkButton Content="Reset" HorizontalAlignment="Right" Padding="4,2" Click="ResetAdjustment_Click"
+                                                 ToolTipService.ToolTip="Reset hue, saturation and lightness" />
+                            </Grid>
+                            <controls:LabeledSlider x:Name="HueShiftSlider" Label="Hue" Minimum="-90" Maximum="90" Unit="°" ShowSign="True"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+                            <controls:LabeledSlider x:Name="SaturationSlider" Label="Saturation" Minimum="-100" Maximum="100" ShowSign="True"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+                            <controls:LabeledSlider x:Name="LightnessSlider" Label="Lightness" Minimum="-100" Maximum="100" ShowSign="True"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+
+                            <TextBlock Text="Selected range" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,4" />
+                            <ToggleSwitch x:Name="ShowMaskToggle" Header="View selected colour range" OffContent="Off" OnContent="On"
+                                          Toggled="ShowMaskToggle_Toggled" Margin="0,0,0,4" />
+                            <controls:LabeledSlider x:Name="TargetHueSlider" Label="Centre hue" Minimum="0" Maximum="359" Unit="°"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+                            <controls:LabeledSlider x:Name="RangeSlider" Label="Range" Minimum="1" Maximum="90" DefaultValue="20" Unit="°"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+                            <controls:LabeledSlider x:Name="SmoothnessSlider" Label="Smoothness" Minimum="0" Maximum="90" DefaultValue="25" Unit="°"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+                            <controls:LabeledSlider x:Name="ProtectSlider" Label="Protect neutrals" Minimum="0" Maximum="30" DefaultValue="5" Unit="%"
+                                                    ValueChanged="EditorSlider_ValueChanged" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- Status bar -->
+        <Grid Grid.Row="2" Padding="12,4" ColumnSpacing="24">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="FileInfoText" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="PixelInfoText" Grid.Column="1" Style="{StaticResource CaptionTextBlockStyle}" FontFamily="Consolas" />
+            <TextBlock x:Name="ZoomText" Grid.Column="2" Style="{StaticResource CaptionTextBlockStyle}" />
+        </Grid>
+    </Grid>
+</Window>
