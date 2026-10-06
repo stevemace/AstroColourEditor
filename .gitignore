@@ -3,3 +3,6 @@ obj/
 .vs/
 *.user
 samples/*.xisf
+
+# Publish output
+/publish/
