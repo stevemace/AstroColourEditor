@@ -182,7 +182,7 @@
                                                     ValueChanged="EditorSlider_ValueChanged" />
                             <controls:LabeledSlider x:Name="SmoothnessSlider" Label="Smoothness" Minimum="0" Maximum="90" DefaultValue="25" Unit="°"
                                                     ValueChanged="EditorSlider_ValueChanged" />
-                            <controls:LabeledSlider x:Name="ProtectSlider" Label="Protect neutrals" Minimum="0" Maximum="30" DefaultValue="5" Unit="%"
+                            <controls:LabeledSlider x:Name="ProtectSlider" Label="Protect neutrals" Minimum="0" Maximum="90" DefaultValue="5" Unit="%"
                                                     ValueChanged="EditorSlider_ValueChanged" />
                         </StackPanel>
                     </StackPanel>

@@ -1,9 +1,19 @@
 <Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/AstroColour.App/AstroColour.App.csproj" />
-    <Project Path="src/AstroColour.Core/AstroColour.Core.csproj" />
+    <Project Path="src/AstroColour.App/AstroColour.App.csproj">
+      <Platform Solution="Release|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AstroColour.Core/AstroColour.Core.csproj">
+      <Platform Solution="Release|x64" Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/AstroColour.Tests/AstroColour.Tests.csproj" />
+    <Project Path="tests/AstroColour.Tests/AstroColour.Tests.csproj">
+      <Platform Solution="Release|x64" Project="x64" />
+    </Project>
   </Folder>
 </Solution>
