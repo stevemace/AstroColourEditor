@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Runtime.InteropServices.WindowsRuntime;
 using AstroColour.App.Controls;
+using AstroColour.Core;
 using AstroColour.Core.Colour;
-using AstroColour.Core.Xisf;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -29,7 +29,7 @@ public sealed partial class MainWindow : Window
     private const int ProxyMaxSide = 2400;
     private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(250);
 
-    private XisfFile? _image;
+    private IAstroImage? _image;
     private string? _path;
     private PreviewLayer? _full;
     private PreviewLayer? _proxy;
@@ -97,7 +97,7 @@ public sealed partial class MainWindow : Window
         if (!await ConfirmDiscardChangesAsync()) return;
 
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.PicturesLibrary };
-        picker.FileTypeFilter.Add(".xisf");
+        foreach (var extension in AstroImageFile.AllExtensions) picker.FileTypeFilter.Add(extension);
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync();
         if (file is not null) await LoadAsync(file.Path);
@@ -110,8 +110,8 @@ public sealed partial class MainWindow : Window
         {
             var (image, rgb, proxy, median) = await Task.Run(() =>
             {
-                var img = XisfFile.Load(path);
-                var full = RgbImage.FromXisf(img);
+                var img = AstroImageFile.Load(path);
+                var full = RgbImage.From(img);
                 int factor = (int)Math.Ceiling(Math.Max(img.Width, img.Height) / (double)ProxyMaxSide);
                 return (img, full, factor > 1 ? full.Downsample(factor) : null, ColourProcessor.EstimateMedian(full));
             });
@@ -185,7 +185,16 @@ public sealed partial class MainWindow : Window
                 SuggestedStartLocation = PickerLocationId.PicturesLibrary,
                 SuggestedFileName = Path.GetFileNameWithoutExtension(_path ?? "image") + "_colour",
             };
-            picker.FileTypeChoices.Add("XISF image", [".xisf"]);
+            // Edits are saved in the format they were loaded from.
+            if (AstroImageFile.IsFits(_path!))
+            {
+                var extension = Path.GetExtension(_path!).ToLowerInvariant();
+                picker.FileTypeChoices.Add("FITS image", [extension, .. AstroImageFile.FitsExtensions.Where(e => e != extension)]);
+            }
+            else
+            {
+                picker.FileTypeChoices.Add("XISF image", AstroImageFile.XisfExtensions);
+            }
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
             var file = await picker.PickSaveFileAsync();
             if (file is null) return false;
@@ -662,7 +671,7 @@ public sealed partial class MainWindow : Window
         Title = _path is null ? AppTitle : $"{Path.GetFileName(_path)}{(_isDirty ? " •" : "")} — {AppTitle}";
         FileInfoText.Text = _image is null
             ? ""
-            : $"{_path}    {_image.Width} × {_image.Height}    {_image.Channels} ch {_image.ColorSpace}    {_image.SampleFormat}";
+            : $"{_path}    {_image.Width} × {_image.Height}    {_image.Channels} ch {_image.ColorSpace}    {_image.SampleFormatName}";
         UpdateZoomText();
     }
 

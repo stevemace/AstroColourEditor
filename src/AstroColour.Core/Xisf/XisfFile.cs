@@ -14,7 +14,7 @@ public enum XisfSampleFormat { UInt8, UInt16, UInt32, Float32, Float64 }
 /// [0,1] float planes; everything else in the header (properties, FITS keywords,
 /// ICC profiles, further images) is preserved verbatim when the file is saved.
 /// </summary>
-public sealed class XisfFile
+public sealed class XisfFile : IAstroImage
 {
     public static readonly XNamespace Ns = "http://www.pixinsight.com/xisf";
     private const string Signature = "XISF0100";
@@ -25,6 +25,7 @@ public sealed class XisfFile
     public int Channels { get; }
     public XisfSampleFormat SampleFormat { get; }
     public string ColorSpace { get; }
+    public string SampleFormatName => SampleFormat.ToString();
     public double BoundsLow { get; }
     public double BoundsHigh { get; }
 

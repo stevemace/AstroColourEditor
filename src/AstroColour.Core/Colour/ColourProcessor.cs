@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using AstroColour.Core.Xisf;
 
 namespace AstroColour.Core.Colour;
 
@@ -58,7 +57,7 @@ public static class ColourProcessor
     }
 
     /// <summary>Applies the adjustments at full precision, returning new planes for saving.</summary>
-    public static float[][] Apply(XisfFile image, IReadOnlyList<ColourAdjustment> adjustments)
+    public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments)
     {
         var planes = image.Planes.Select(p => (float[])p.Clone()).ToArray();
         if (!image.IsColour) return planes;

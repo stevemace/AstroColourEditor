@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using AstroColour.Core.Xisf;
 
 namespace AstroColour.Core.Colour;
 
@@ -23,7 +22,7 @@ public sealed class RgbImage
     public int PixelCount => Width * Height;
 
     /// <summary>Wraps the image's planes without copying; a monochrome image uses one plane for all three.</summary>
-    public static RgbImage FromXisf(XisfFile image)
+    public static RgbImage From(IAstroImage image)
     {
         var r = image.Planes[0];
         return image.IsColour

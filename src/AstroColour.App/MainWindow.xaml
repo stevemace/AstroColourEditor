@@ -21,7 +21,7 @@
         <!-- Toolbar -->
         <CommandBar x:Name="Toolbar" Grid.Row="0" HorizontalAlignment="Left" DefaultLabelPosition="Right"
                     IsDynamicOverflowEnabled="False" Background="Transparent">
-            <AppBarButton Icon="OpenFile" Label="Open" Click="Open_Click" ToolTipService.ToolTip="Open an XISF image (Ctrl+O)">
+            <AppBarButton Icon="OpenFile" Label="Open" Click="Open_Click" ToolTipService.ToolTip="Open an XISF or FITS image (Ctrl+O)">
                 <AppBarButton.KeyboardAccelerators>
                     <KeyboardAccelerator Modifiers="Control" Key="O" />
                 </AppBarButton.KeyboardAccelerators>
@@ -90,7 +90,7 @@
 
                 <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
                     <FontIcon Glyph="&#xE91B;" FontSize="48" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="Open a PixInsight XISF image to begin" Foreground="#FFB0B0B0" HorizontalAlignment="Center" />
+                    <TextBlock Text="Open an XISF or FITS image to begin" Foreground="#FFB0B0B0" HorizontalAlignment="Center" />
                     <Button Content="Open image…" HorizontalAlignment="Center" Style="{StaticResource AccentButtonStyle}" Click="Open_Click" />
                 </StackPanel>
 
