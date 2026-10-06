@@ -13,9 +13,12 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
     }
 
-    /// <summary>Path of the crash log, in %LOCALAPPDATA%\AstroColourEditor.</summary>
-    public static string CrashLogPath { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AstroColourEditor", "crash.log");
+    /// <summary>%LOCALAPPDATA%\AstroColourEditor, for the crash log and saved window placement.</summary>
+    public static string DataFolder { get; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AstroColourEditor");
+
+    /// <summary>Path of the crash log, in <see cref="DataFolder"/>.</summary>
+    public static string CrashLogPath { get; } = Path.Combine(DataFolder, "crash.log");
 
     private static void LogCrash(Exception? ex)
     {

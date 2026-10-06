@@ -5,6 +5,7 @@ using AstroColour.Core.Colour;
 using AstroColour.Core.Xisf;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -52,10 +53,14 @@ public sealed partial class MainWindow : Window
     private Point _panStart;
     private double _panStartH, _panStartV;
 
+    // Last position and size while neither maximized nor minimized, saved on close.
+    private RectInt32 _restoredBounds;
+
     public MainWindow()
     {
         InitializeComponent();
-        AppWindow.Resize(new SizeInt32(1500, 950));
+        RestorePlacement();
+        AppWindow.Changed += AppWindow_Changed;
         AppWindow.Closing += AppWindow_Closing;
         AdjustmentList.ItemsSource = _adjustments;
         TargetHueSlider.GradientBrush = HueRamp(0, 360);
@@ -210,9 +215,44 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
+    private void RestorePlacement()
     {
-        if (_closeConfirmed || !_isDirty) return;
+        if (WindowPlacement.Load() is { } placement)
+        {
+            AppWindow.MoveAndResize(placement.Bounds);
+            _restoredBounds = placement.Bounds;
+            if (placement.Maximized && AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
+        }
+        else
+        {
+            AppWindow.Resize(new SizeInt32(1500, 950));
+            _restoredBounds = new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+        }
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if ((args.DidPositionChange || args.DidSizeChange)
+            && sender.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Restored })
+        {
+            _restoredBounds = new RectInt32(sender.Position.X, sender.Position.Y, sender.Size.Width, sender.Size.Height);
+        }
+    }
+
+    private void SavePlacement()
+    {
+        var maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
+        var b = _restoredBounds;
+        new WindowPlacement(b.X, b.Y, b.Width, b.Height, maximized).Save();
+    }
+
+    private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_closeConfirmed || !_isDirty)
+        {
+            SavePlacement();
+            return;
+        }
         args.Cancel = true;
         if (await ConfirmDiscardChangesAsync())
         {
