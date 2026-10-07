@@ -1,11 +1,11 @@
 # Astro Colour Editor
 
-A WinUI 3 desktop tool for selective colour editing of `.xisf` and FITS images, modelled on
+A WinUI 3 desktop tool for selective colour editing of `.xisf`, FITS and TIFF images, modelled on
 Capture One's colour editor.
 
 ## Using it
 
-1. **Open** (Ctrl+O) an `.xisf`, `.fits`, `.fit` or `.fts` image, or pass a file path on the command line / drag it onto the exe.
+1. **Open** (Ctrl+O) an `.xisf`, `.fits`, `.fit`, `.fts`, `.tif` or `.tiff` image, or pass a file path on the command line / drag it onto the exe.
 2. Turn on **Pick colour from image** (P) and click a colour in the image. A new entry appears in the list.
 3. Adjust that colour's **Hue**, **Saturation** and **Lightness**. Similar hues are adjusted too,
    fading out smoothly.
@@ -46,6 +46,17 @@ Colour editing is intended for stretched (non-linear) images; the app warns when
   `CHECKSUM`/`DATASUM` are removed, since they would no longer match. Unedited, the file is written back byte for byte.
 - Compressed (fpack `.fz`) images are not supported.
 
+## TIFF support
+
+- Reads the first image in the file: greyscale or RGB, optionally with extra channels such as alpha;
+  8/16/32-bit integer or 16/32/64-bit float; contiguous or planar, stripped or tiled; any compression
+  LibTiff.NET can decode (LZW, Deflate, PackBits, …) with horizontal or floating-point predictors.
+- Integer data is normalised by its type's range; float data as for FITS. `MinIsWhite` images are inverted.
+- Saving keeps the sample format, channel layout, compression (LZW if the original was lossy or exotic), predictor,
+  resolution, orientation, ICC profile, XMP, IPTC and text tags. Images are written in strips. Further pages
+  and EXIF data are not kept.
+- Palette, CMYK and YCbCr images are not supported.
+
 ## Building
 
 Requires the .NET 10 SDK on Windows 10/11.
@@ -67,9 +78,9 @@ dotnet publish src/AstroColour.App -p:PublishProfile=win-x64
 
 ## Layout
 
-- `src/AstroColour.Core`: XISF and FITS readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`) and the colour engine (`Colour/`), with no UI dependencies.
+- `src/AstroColour.Core`: XISF, FITS and TIFF readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`, `Tiff/TiffFile.cs`) and the colour engine (`Colour/`), with no UI dependencies.
 - `src/AstroColour.App`: the WinUI 3 app.
-- `tests/AstroColour.Tests`: unit tests for XISF and FITS decoding/encoding and the colour maths.
+- `tests/AstroColour.Tests`: unit tests for XISF, FITS and TIFF decoding/encoding and the colour maths.
 - `tools/make_icon.py`: draws the app icon (`src/AstroColour.App/Assets/AppIcon.ico`).
 
 If the app crashes, details are written to `%LOCALAPPDATA%\AstroColourEditor\crash.log`.

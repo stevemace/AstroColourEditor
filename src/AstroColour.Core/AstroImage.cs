@@ -1,4 +1,5 @@
 using AstroColour.Core.Fits;
+using AstroColour.Core.Tiff;
 using AstroColour.Core.Xisf;
 
 namespace AstroColour.Core;
@@ -28,11 +29,27 @@ public static class AstroImageFile
 {
     public static readonly string[] XisfExtensions = [".xisf"];
     public static readonly string[] FitsExtensions = [".fits", ".fit", ".fts"];
-    public static readonly string[] AllExtensions = [.. XisfExtensions, .. FitsExtensions];
+    public static readonly string[] TiffExtensions = [".tif", ".tiff"];
+    public static readonly string[] AllExtensions = [.. XisfExtensions, .. FitsExtensions, .. TiffExtensions];
 
-    public static bool IsFits(string path) =>
-        FitsExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    public static bool IsFits(string path) => HasExtension(path, FitsExtensions);
 
-    /// <summary>Loads an XISF or FITS file, chosen by its extension.</summary>
-    public static IAstroImage Load(string path) => IsFits(path) ? FitsFile.Load(path) : XisfFile.Load(path);
+    public static bool IsTiff(string path) => HasExtension(path, TiffExtensions);
+
+    /// <summary>Loads an XISF, FITS or TIFF file, chosen by its extension.</summary>
+    public static IAstroImage Load(string path) =>
+        IsFits(path) ? FitsFile.Load(path) : IsTiff(path) ? TiffFile.Load(path) : XisfFile.Load(path);
+
+    /// <summary>The file type name and extensions that a file loaded from <paramref name="path"/> is saved as, its own extension first.</summary>
+    public static (string Name, string[] Extensions) SaveFormat(string path)
+    {
+        var (name, extensions) = IsFits(path) ? ("FITS image", FitsExtensions)
+            : IsTiff(path) ? ("TIFF image", TiffExtensions)
+            : ("XISF image", XisfExtensions);
+        string own = Path.GetExtension(path).ToLowerInvariant();
+        return (name, extensions.Contains(own) ? [own, .. extensions.Where(e => e != own)] : extensions);
+    }
+
+    private static bool HasExtension(string path, string[] extensions) =>
+        extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 }

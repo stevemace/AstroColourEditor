@@ -186,15 +186,8 @@ public sealed partial class MainWindow : Window
                 SuggestedFileName = Path.GetFileNameWithoutExtension(_path ?? "image") + "_colour",
             };
             // Edits are saved in the format they were loaded from.
-            if (AstroImageFile.IsFits(_path!))
-            {
-                var extension = Path.GetExtension(_path!).ToLowerInvariant();
-                picker.FileTypeChoices.Add("FITS image", [extension, .. AstroImageFile.FitsExtensions.Where(e => e != extension)]);
-            }
-            else
-            {
-                picker.FileTypeChoices.Add("XISF image", AstroImageFile.XisfExtensions);
-            }
+            var (formatName, extensions) = AstroImageFile.SaveFormat(_path!);
+            picker.FileTypeChoices.Add(formatName, extensions);
             InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
             var file = await picker.PickSaveFileAsync();
             if (file is null) return false;
