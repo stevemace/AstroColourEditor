@@ -26,7 +26,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp -R "$OUT/bin/." "$APP/Contents/MacOS/"
 rm -rf "$OUT/bin"
 sed "s/\$VERSION/$VERSION/g" "$PROJECT/macOS/Info.plist" > "$APP/Contents/Info.plist"
-cp "$ROOT/src/AstroColour.App/Assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+cp "$ROOT/src/AstroColour.Desktop/Assets/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 if [ -n "${SIGN_IDENTITY:-}" ]; then
     # Sign the native libraries first, then the bundle (whose main executable gets the entitlements).

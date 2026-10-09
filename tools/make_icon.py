@@ -2,7 +2,7 @@
 
     python tools/make_icon.py
 
-Writes src/AstroColour.App/Assets/AppIcon.ico (16-256 px), AppIcon.png (1024 px) and AppIcon.icns (macOS). Needs Pillow.
+Writes src/AstroColour.Desktop/Assets/AppIcon.ico (16-256 px), AppIcon.png (1024 px) and AppIcon.icns (macOS). Needs Pillow.
 """
 import colorsys
 import math
@@ -13,7 +13,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 S = 2048  # working size; downsampled for anti-aliasing
 C = S / 2
-OUT = Path(__file__).resolve().parent.parent / "src" / "AstroColour.App" / "Assets"
+OUT = Path(__file__).resolve().parent.parent / "src" / "AstroColour.Desktop" / "Assets"
 
 
 def radial_gradient(size, inner, outer, centre, radius):

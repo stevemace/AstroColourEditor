@@ -1,8 +1,7 @@
 # Astro Colour Editor
 
 A desktop tool for selective colour editing of `.xisf`, FITS and TIFF images, modelled on
-Capture One's colour editor. It runs on Windows and macOS (Avalonia UI); the original Windows-only
-WinUI 3 version is still in the repo while the Avalonia one is proven.
+Capture One's colour editor. It runs on Windows and macOS (Avalonia UI).
 
 ## Using it
 
@@ -65,14 +64,16 @@ Colour editing is intended for stretched (non-linear) images; the app warns when
 
 Requires the .NET 10 SDK.
 
-### Windows and macOS (Avalonia)
-
 ```
 dotnet run --project src/AstroColour.Desktop
 dotnet test tests/AstroColour.Tests
 ```
 
-On a Mac, build the projects rather than the solution, which also contains the Windows-only WinUI app.
+To produce a self-contained Windows folder (`publish/win-x64`) you can copy to a PC without .NET installed:
+
+```
+dotnet publish src/AstroColour.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64
+```
 
 To make a Mac app, run this on a Mac:
 
@@ -85,33 +86,14 @@ only ad-hoc signed: it runs on the Mac that built it, but other Macs block it un
 right-click > Open. To distribute it, set `SIGN_IDENTITY` (a Developer ID certificate) and `NOTARY_PROFILE`
 (a `notarytool` keychain profile); see the script's header.
 
-A Windows build: `dotnet publish src/AstroColour.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64-avalonia`.
-
-### Windows (WinUI 3)
-
-Requires Windows 10/11.
-
-```
-dotnet build src/AstroColour.App -c Release
-```
-
-The app is unpackaged with the Windows App SDK bundled, so the output
-`src/AstroColour.App/bin/Release/net10.0-windows10.0.19041.0/win-x64/AstroColourEditor.exe` runs directly.
-To produce a self-contained folder (`publish/win-x64`) you can copy to a PC without .NET installed:
-
-```
-dotnet publish src/AstroColour.App -p:PublishProfile=win-x64
-```
-
 `samples/MakeSample.cs` generates a synthetic test image: `dotnet run samples/MakeSample.cs`.
 
 ## Layout
 
 - `src/AstroColour.Core`: XISF, FITS and TIFF readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`, `Tiff/TiffFile.cs`) and the colour engine (`Colour/`), with no UI dependencies.
-- `src/AstroColour.Desktop`: the cross-platform Avalonia app (`macOS/` holds the app bundle's Info.plist and entitlements).
-- `src/AstroColour.App`: the original WinUI 3 app (Windows only).
+- `src/AstroColour.Desktop`: the Avalonia app (`macOS/` holds the app bundle's Info.plist and entitlements).
 - `tests/AstroColour.Tests`: unit tests for XISF, FITS and TIFF decoding/encoding and the colour maths.
-- `tools/make_icon.py`: draws the app icon (`src/AstroColour.App/Assets/AppIcon.ico`, `.png` and `.icns`).
+- `tools/make_icon.py`: draws the app icon (`src/AstroColour.Desktop/Assets/AppIcon.ico`, `.png` and `.icns`).
 - `tools/package-macos.sh`: builds, signs and zips the macOS app bundle.
 
 If the app crashes, details are written to `%LOCALAPPDATA%\AstroColourEditor\crash.log`
