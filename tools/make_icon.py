@@ -2,7 +2,7 @@
 
     python tools/make_icon.py
 
-Writes src/AstroColour.App/Assets/AppIcon.ico (16-256 px) and AppIcon.png (1024 px). Needs Pillow.
+Writes src/AstroColour.App/Assets/AppIcon.ico (16-256 px), AppIcon.png (1024 px) and AppIcon.icns (macOS). Needs Pillow.
 """
 import colorsys
 import math
@@ -136,7 +136,15 @@ def main():
     sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
     frames = [img.resize((s, s), Image.LANCZOS) for s in sizes]
     frames[-1].save(OUT / "AppIcon.ico", sizes=[(s, s) for s in sizes], append_images=frames[:-1])
-    print(f"Wrote {OUT / 'AppIcon.ico'} and {OUT / 'AppIcon.png'}")
+    save_icns(big, OUT / "AppIcon.icns")
+    print(f"Wrote {OUT / 'AppIcon.ico'}, {OUT / 'AppIcon.png'} and {OUT / 'AppIcon.icns'}")
+
+
+def save_icns(icon, path):
+    """macOS icon: the tile drawn on 824 of 1024 px, the margin Apple's icon grid leaves around it."""
+    canvas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    canvas.paste(icon.resize((824, 824), Image.LANCZOS), (100, 100))
+    canvas.save(path)
 
 
 if __name__ == "__main__":

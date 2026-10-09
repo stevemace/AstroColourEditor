@@ -1,0 +1,19 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AstroColour.Desktop.Controls.InfoBar"
+             IsVisible="False" Foreground="#FFF0F0F0">
+    <!-- Always shown over the dark image area, so its colours do not follow the app theme. -->
+    <Border x:Name="Frame" CornerRadius="6" BorderThickness="1" Padding="12,10,6,10">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+            <Ellipse x:Name="Dot" Width="10" Height="10" VerticalAlignment="Top" Margin="0,5,12,0" />
+            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                <TextBlock x:Name="TitleText" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock x:Name="MessageText" TextWrapping="Wrap" Opacity="0.85" />
+            </StackPanel>
+            <Button Grid.Column="2" VerticalAlignment="Top" Margin="8,-4,0,0" Padding="6" Background="Transparent"
+                    BorderThickness="0" Foreground="#FFF0F0F0" Click="Close_Click" ToolTip.Tip="Close">
+                <Path Data="M2,2 L10,10 M10,2 L2,10" Stroke="#FFF0F0F0" StrokeThickness="1.5" Width="12" Height="12" />
+            </Button>
+        </Grid>
+    </Border>
+</UserControl>

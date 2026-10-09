@@ -7,6 +7,7 @@
     <Project Path="src/AstroColour.App/AstroColour.App.csproj">
       <Platform Solution="Release|x64" Project="x64" />
     </Project>
+    <Project Path="src/AstroColour.Desktop/AstroColour.Desktop.csproj" />
     <Project Path="src/AstroColour.Core/AstroColour.Core.csproj">
       <Platform Solution="Release|x64" Project="x64" />
     </Project>

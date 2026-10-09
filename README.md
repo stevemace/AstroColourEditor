@@ -1,11 +1,15 @@
 # Astro Colour Editor
 
-A WinUI 3 desktop tool for selective colour editing of `.xisf`, FITS and TIFF images, modelled on
-Capture One's colour editor.
+A desktop tool for selective colour editing of `.xisf`, FITS and TIFF images, modelled on
+Capture One's colour editor. It runs on Windows and macOS (Avalonia UI); the original Windows-only
+WinUI 3 version is still in the repo while the Avalonia one is proven.
 
 ## Using it
 
-1. **Open** (Ctrl+O) an `.xisf`, `.fits`, `.fit`, `.fts`, `.tif` or `.tiff` image, or pass a file path on the command line / drag it onto the exe.
+Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
+
+1. **Open** (Ctrl+O) an `.xisf`, `.fits`, `.fit`, `.fts`, `.tif` or `.tiff` image, or pass a file path on the command line / drag it onto the exe
+   (on a Mac: Finder's "Open With", or drop it on the Dock icon).
 2. Turn on **Pick colour from image** (P) and click a colour in the image. A new entry appears in the list.
 3. Adjust that colour's **Hue**, **Saturation** and **Lightness**. Similar hues are adjusted too,
    fading out smoothly.
@@ -18,7 +22,7 @@ Capture One's colour editor.
 7. **Save** (Ctrl+S) overwrites the file after confirmation; **Save as** (Ctrl+Shift+S) writes a new file
    in the same format as the original.
 
-Navigation: scroll wheel zooms around the cursor, drag pans (right-drag also pans while the picker is on),
+Navigation: scroll wheel (or trackpad pinch) zooms around the cursor, drag pans (right-drag also pans while the picker is on),
 **Fit** (Ctrl+0) and **100%** (Ctrl+1).
 
 On large images (longest side over 2400 px), the display uses a reduced-resolution preview while
@@ -59,11 +63,36 @@ Colour editing is intended for stretched (non-linear) images; the app warns when
 
 ## Building
 
-Requires the .NET 10 SDK on Windows 10/11.
+Requires the .NET 10 SDK.
+
+### Windows and macOS (Avalonia)
+
+```
+dotnet run --project src/AstroColour.Desktop
+dotnet test tests/AstroColour.Tests
+```
+
+On a Mac, build the projects rather than the solution, which also contains the Windows-only WinUI app.
+
+To make a Mac app, run this on a Mac:
+
+```
+tools/package-macos.sh            # Apple Silicon; pass osx-x64 for Intel Macs
+```
+
+It writes `publish/macos-arm64/Astro Colour Editor.app` and a zip of it. Without signing settings the app is
+only ad-hoc signed: it runs on the Mac that built it, but other Macs block it until it is opened with
+right-click > Open. To distribute it, set `SIGN_IDENTITY` (a Developer ID certificate) and `NOTARY_PROFILE`
+(a `notarytool` keychain profile); see the script's header.
+
+A Windows build: `dotnet publish src/AstroColour.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64-avalonia`.
+
+### Windows (WinUI 3)
+
+Requires Windows 10/11.
 
 ```
 dotnet build src/AstroColour.App -c Release
-dotnet test tests/AstroColour.Tests
 ```
 
 The app is unpackaged with the Windows App SDK bundled, so the output
@@ -79,8 +108,11 @@ dotnet publish src/AstroColour.App -p:PublishProfile=win-x64
 ## Layout
 
 - `src/AstroColour.Core`: XISF, FITS and TIFF readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`, `Tiff/TiffFile.cs`) and the colour engine (`Colour/`), with no UI dependencies.
-- `src/AstroColour.App`: the WinUI 3 app.
+- `src/AstroColour.Desktop`: the cross-platform Avalonia app (`macOS/` holds the app bundle's Info.plist and entitlements).
+- `src/AstroColour.App`: the original WinUI 3 app (Windows only).
 - `tests/AstroColour.Tests`: unit tests for XISF, FITS and TIFF decoding/encoding and the colour maths.
-- `tools/make_icon.py`: draws the app icon (`src/AstroColour.App/Assets/AppIcon.ico`).
+- `tools/make_icon.py`: draws the app icon (`src/AstroColour.App/Assets/AppIcon.ico`, `.png` and `.icns`).
+- `tools/package-macos.sh`: builds, signs and zips the macOS app bundle.
 
-If the app crashes, details are written to `%LOCALAPPDATA%\AstroColourEditor\crash.log`.
+If the app crashes, details are written to `%LOCALAPPDATA%\AstroColourEditor\crash.log`
+(`~/Library/Application Support/AstroColourEditor/crash.log` on a Mac).

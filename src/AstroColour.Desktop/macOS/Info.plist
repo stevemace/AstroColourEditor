@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- App bundle metadata. tools/package-macos.sh fills in the version. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Astro Colour Editor</string>
+    <key>CFBundleDisplayName</key>
+    <string>Astro Colour Editor</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.stevemace.AstroColourEditor</string>
+    <key>CFBundleExecutable</key>
+    <string>AstroColourEditor</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>$VERSION</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$VERSION</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.photography</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- Lets Finder offer the app under "Open With" and accept files dropped on the Dock icon. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>XISF image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.pixinsight.xisf</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>FITS image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>gov.nasa.gsfc.fits</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>TIFF image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.tiff</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- XISF and FITS have no system-defined type, so declare them for their file extensions. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.pixinsight.xisf</string>
+            <key>UTTypeDescription</key>
+            <string>XISF image</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.image</string>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>xisf</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>gov.nasa.gsfc.fits</string>
+            <key>UTTypeDescription</key>
+            <string>FITS image</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.image</string>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>fits</string>
+                    <string>fit</string>
+                    <string>fts</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>
