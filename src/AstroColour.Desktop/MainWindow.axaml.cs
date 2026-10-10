@@ -495,6 +495,9 @@ public partial class MainWindow : Window
         RangeSlider.Value = m.Range;
         SmoothnessSlider.Value = m.Smoothness;
         ProtectSlider.Value = m.NeutralProtection;
+        LightnessMinSlider.Value = m.LightnessMin;
+        LightnessMaxSlider.Value = m.LightnessMax;
+        LightnessSmoothnessSlider.Value = m.LightnessSmoothness;
         HueShiftSlider.Value = m.HueShift;
         SaturationSlider.Value = m.Saturation;
         LightnessSlider.Value = m.Lightness;
@@ -507,11 +510,22 @@ public partial class MainWindow : Window
     {
         if (_suppressEditorEvents || Selected is not { } item) return;
 
+        // Keep the lightness limits in order by pushing the other one along.
+        _suppressEditorEvents = true;
+        if (ReferenceEquals(sender, LightnessMinSlider) && LightnessMaxSlider.Value < LightnessMinSlider.Value)
+            LightnessMaxSlider.Value = LightnessMinSlider.Value;
+        else if (ReferenceEquals(sender, LightnessMaxSlider) && LightnessMinSlider.Value > LightnessMaxSlider.Value)
+            LightnessMinSlider.Value = LightnessMaxSlider.Value;
+        _suppressEditorEvents = false;
+
         var m = item.Model;
         m.TargetHue = (float)TargetHueSlider.Value;
         m.Range = (float)RangeSlider.Value;
         m.Smoothness = (float)SmoothnessSlider.Value;
         m.NeutralProtection = (float)ProtectSlider.Value;
+        m.LightnessMin = (float)LightnessMinSlider.Value;
+        m.LightnessMax = (float)LightnessMaxSlider.Value;
+        m.LightnessSmoothness = (float)LightnessSmoothnessSlider.Value;
         m.HueShift = (float)HueShiftSlider.Value;
         m.Saturation = (float)SaturationSlider.Value;
         m.Lightness = (float)LightnessSlider.Value;
@@ -549,6 +563,8 @@ public partial class MainWindow : Window
         HueShiftSlider.GradientBrush = HueRamp(h - 90, h + 90);
         SaturationSlider.GradientBrush = Ramp(Hsl(h, 0, 0.5f), Hsl(h, 1, 0.5f));
         LightnessSlider.GradientBrush = Ramp(Hsl(h, 0.8f, 0.1f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 0.9f));
+        LightnessMinSlider.GradientBrush = LightnessMaxSlider.GradientBrush =
+            Ramp(Hsl(h, 0.8f, 0f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 1f));
     }
 
     private static LinearGradientBrush HueRamp(float from, float to)

@@ -6,8 +6,9 @@
             <TextBlock x:Name="LabelText" />
             <TextBlock x:Name="ValueText" HorizontalAlignment="Right" Opacity="0.7" />
         </Grid>
-        <!-- The colour ramp sits just below the thumb, and behind the slider in case they touch. -->
-        <Grid>
+        <!-- The colour ramp sits just below the thumb, and behind the slider in case they touch.
+             The negative top margin pulls the slider up into the empty space above its thumb. -->
+        <Grid Margin="0,-10,0,0">
             <Rectangle x:Name="Gradient" Height="5" RadiusX="2.5" RadiusY="2.5" Margin="10,0,10,5" VerticalAlignment="Bottom"
                        IsVisible="False" IsHitTestVisible="False" />
             <Slider x:Name="Slider" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />

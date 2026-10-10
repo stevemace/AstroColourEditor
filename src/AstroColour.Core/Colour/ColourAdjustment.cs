@@ -1,10 +1,13 @@
+using System.Runtime.CompilerServices;
+
 namespace AstroColour.Core.Colour;
 
 /// <summary>
 /// One colour range and the HSL changes applied to it, in the style of Capture One's
 /// Advanced colour editor. Pixels whose hue lies within <see cref="Range"/> degrees of
 /// <see cref="TargetHue"/> receive the full adjustment, which then fades out over a
-/// further <see cref="Smoothness"/> degrees.
+/// further <see cref="Smoothness"/> degrees. The selection can also be limited to pixels
+/// whose HSL lightness lies between <see cref="LightnessMin"/> and <see cref="LightnessMax"/>.
 /// </summary>
 public sealed class ColourAdjustment
 {
@@ -22,6 +25,15 @@ public sealed class ColourAdjustment
     /// so that the neutral background and white stars are left alone.
     /// </summary>
     public float NeutralProtection { get; set; } = 5f;
+
+    /// <summary>HSL lightness, as a percentage, below which pixels are excluded.</summary>
+    public float LightnessMin { get; set; }
+
+    /// <summary>HSL lightness, as a percentage, above which pixels are excluded.</summary>
+    public float LightnessMax { get; set; } = 100f;
+
+    /// <summary>Width, as a percentage of lightness, of the falloff beyond the lightness limits.</summary>
+    public float LightnessSmoothness { get; set; } = 10f;
 
     /// <summary>Hue rotation in degrees.</summary>
     public float HueShift { get; set; }
@@ -50,11 +62,14 @@ public sealed class ColourAdjustment
         Lightness = 0;
     }
 
-    /// <summary>How strongly (0..1) a pixel with the given hue and chroma is selected.</summary>
-    public float Weight(float hue, float chroma)
+    /// <summary>How strongly (0..1) a pixel with the given hue, chroma and lightness is selected.</summary>
+    public float Weight(float hue, float chroma, float lightness)
     {
         float chromaWeight = NeutralProtection <= 0 ? 1f : SmoothStep(0f, NeutralProtection / 100f, chroma);
         if (chromaWeight <= 0f) return 0f;
+
+        float lightnessWeight = LightnessWeight(lightness, LightnessMin / 100f, LightnessMax / 100f, LightnessSmoothness / 100f);
+        if (lightnessWeight <= 0f) return 0f;
 
         float distance = HueDistance(hue, TargetHue);
         float hueWeight;
@@ -62,7 +77,20 @@ public sealed class ColourAdjustment
         else if (Smoothness <= 0f || distance >= Range + Smoothness) return 0f;
         else hueWeight = 1f - SmoothStep(Range, Range + Smoothness, distance);
 
-        return hueWeight * chromaWeight;
+        return hueWeight * chromaWeight * lightnessWeight;
+    }
+
+    /// <summary>
+    /// 1 for lightness within [<paramref name="low"/>, <paramref name="high"/>], fading to 0 over
+    /// <paramref name="softness"/> beyond either limit. All values are fractions in [0,1].
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float LightnessWeight(float lightness, float low, float high, float softness)
+    {
+        float w = 1f;
+        if (lightness < low) w = softness <= 0f ? 0f : SmoothStep(low - softness, low, lightness);
+        if (lightness > high) w *= softness <= 0f ? 0f : 1f - SmoothStep(high, high + softness, lightness);
+        return w;
     }
 
     public static float HueDistance(float a, float b)

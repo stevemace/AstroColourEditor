@@ -39,8 +39,8 @@ public static class ColourProcessor
                 {
                     float cr = Math.Clamp(r, 0f, 1f), cg = Math.Clamp(g, 0f, 1f), cb = Math.Clamp(b, 0f, 1f);
                     set.Adjust(ref r, ref g, ref b);
-                    ColourMath.RgbToHsl(cr, cg, cb, out float h, out _, out _, out float chroma);
-                    float w = maskSet.Weight(h, chroma);
+                    ColourMath.RgbToHsl(cr, cg, cb, out float h, out _, out float l, out float chroma);
+                    float w = maskSet.Weight(h, chroma, l);
                     float grey = 0.2126f * cr + 0.7152f * cg + 0.0722f * cb;
                     r = grey + (r - grey) * w;
                     g = grey + (g - grey) * w;

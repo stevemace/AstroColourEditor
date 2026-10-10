@@ -13,7 +13,8 @@ public sealed class AdjustmentSet
     private readonly Entry[] _entries;
     private readonly bool[] _anySelected; // bin i: does any adjustment select hues in [i, i+1]?
 
-    private readonly record struct Entry(float[] HueWeights, float ChromaEdge, float HueShift, float Saturation, float Lightness);
+    private readonly record struct Entry(float[] HueWeights, float ChromaEdge, float LightLow, float LightHigh, float LightSoftness,
+        float HueShift, float Saturation, float Lightness);
 
     /// <param name="adjustments">Adjustments to include; disabled or no-op ones are skipped unless <paramref name="includeAll"/>.</param>
     /// <param name="includeAll">Include every adjustment, e.g. to evaluate a selection mask.</param>
@@ -21,7 +22,9 @@ public sealed class AdjustmentSet
     {
         _entries = adjustments
             .Where(a => includeAll || (a.Enabled && a.HasEdits))
-            .Select(a => new Entry(HueTable(a), a.NeutralProtection / 100f, a.HueShift, a.Saturation / 100f, a.Lightness / 100f))
+            .Select(a => new Entry(HueTable(a), a.NeutralProtection / 100f,
+                a.LightnessMin / 100f, a.LightnessMax / 100f, a.LightnessSmoothness / 100f,
+                a.HueShift, a.Saturation / 100f, a.Lightness / 100f))
             .ToArray();
 
         _anySelected = new bool[Bins];
@@ -37,22 +40,27 @@ public sealed class AdjustmentSet
         var table = new float[Bins + 1];
         var unprotected = a.Clone();
         unprotected.NeutralProtection = 0;
+        unprotected.LightnessMin = 0;
+        unprotected.LightnessMax = 100;
         for (int i = 0; i <= Bins; i++)
-            table[i] = unprotected.Weight(i * (360f / Bins), 1f);
+            table[i] = unprotected.Weight(i * (360f / Bins), 1f, 0.5f);
         return table;
     }
 
-    /// <summary>Selection weight (0..1) of the first adjustment for a pixel's hue and chroma.</summary>
-    public float Weight(float hue, float chroma) => _entries.Length == 0 ? 0f : Weight(_entries[0], hue, chroma);
+    /// <summary>Selection weight (0..1) of the first adjustment for a pixel's hue, chroma and lightness.</summary>
+    public float Weight(float hue, float chroma, float lightness) =>
+        _entries.Length == 0 ? 0f : Weight(_entries[0], hue, chroma, lightness);
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private static float Weight(in Entry e, float hue, float chroma)
+    private static float Weight(in Entry e, float hue, float chroma, float lightness)
     {
         float pos = hue * (Bins / 360f);
         int i = (int)pos;
         if ((uint)i >= Bins) i = Bins - 1;
         float frac = pos - i;
         float w = e.HueWeights[i] + (e.HueWeights[i + 1] - e.HueWeights[i]) * frac;
+        if (w <= 0f) return w;
+        w *= ColourAdjustment.LightnessWeight(lightness, e.LightLow, e.LightHigh, e.LightSoftness);
         if (w <= 0f || e.ChromaEdge <= 0f) return w;
         float t = Math.Clamp(chroma / e.ChromaEdge, 0f, 1f);
         return w * t * t * (3f - 2f * t);
@@ -84,11 +92,12 @@ public sealed class AdjustmentSet
         if ((uint)bin >= Bins) bin = Bins - 1;
         if (!_anySelected[bin]) return false;
 
+        float l = (max + min) * 0.5f;
         float dh = 0f, ds = 0f, dl = 0f;
         bool selected = false;
         foreach (ref readonly var e in _entries.AsSpan())
         {
-            float w = Weight(e, h, chroma);
+            float w = Weight(e, h, chroma, l);
             if (w <= 0f) continue;
             selected = true;
             dh += w * e.HueShift;
@@ -97,7 +106,6 @@ public sealed class AdjustmentSet
         }
         if (!selected) return false;
 
-        float l = (max + min) * 0.5f;
         float s = l > 0.5f ? chroma / (2f - max - min) : chroma / (max + min);
         ds = Math.Clamp(ds, -1f, 1f);
         dl = Math.Clamp(dl, -1f, 1f);
