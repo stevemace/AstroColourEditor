@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using AstroColour.Core;
 using AstroColour.Core.Colour;
+using AstroColour.Core.Curves;
 using AstroColour.Desktop.Controls;
 using Avalonia;
 using Avalonia.Controls;
@@ -20,6 +21,9 @@ public partial class MainWindow : Window
     private const string AppTitle = "Astro Colour Editor";
 
     private readonly ObservableCollection<AdjustmentItem> _adjustments = [];
+    private readonly CurveSet _curves = new();
+    private CurveChannel _curveChannel = CurveChannel.Rgb;
+    private float[][]? _histogram;
 
     // Images longer than this are previewed at reduced size while sliders move.
     private const int ProxyMaxSide = 2400;
@@ -66,6 +70,7 @@ public partial class MainWindow : Window
         PositionChanged += (_, _) => TrackRestoredBounds();
         AdjustmentList.ItemsSource = _adjustments;
         TargetHueSlider.GradientBrush = HueRamp(0, 360);
+        ShowCurve(CurveChannel.Rgb);
 
         SetShortcutTip(OpenButton, "Open an XISF, FITS or TIFF image", "O");
         SetShortcutTip(SaveButton, "Save over the current file", "S");
@@ -157,12 +162,13 @@ public partial class MainWindow : Window
         SetBusy("Loading image…");
         try
         {
-            var (image, rgb, proxy, median) = await Task.Run(() =>
+            var (image, rgb, proxy, median, histogram) = await Task.Run(() =>
             {
                 var img = AstroImageFile.Load(path);
                 var full = RgbImage.From(img);
                 int factor = (int)Math.Ceiling(Math.Max(img.Width, img.Height) / (double)ProxyMaxSide);
-                return (img, full, factor > 1 ? full.Downsample(factor) : null, ColourProcessor.EstimateMedian(full));
+                var small = factor > 1 ? full.Downsample(factor) : null;
+                return (img, full, small, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full));
             });
 
             _image = image;
@@ -170,8 +176,12 @@ public partial class MainWindow : Window
             _isDirty = false;
             _overwriteConfirmed = false;
             _adjustments.Clear();
+            _curves.Reset();
+            _histogram = histogram;
+            ShowCurve(CurveChannel.Rgb);
             ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
+            if (!image.IsColour) EditorTabs.SelectedItem = CurvesTab;
 
             _full = new PreviewLayer(rgb);
             _proxy = proxy is null ? null : new PreviewLayer(proxy);
@@ -182,7 +192,7 @@ public partial class MainWindow : Window
             LinearInfo.IsOpen = image.IsColour && median < 0.03f;
             MessageInfo.IsOpen = false;
             if (!image.IsColour)
-                ShowMessage(InfoBarSeverity.Warning, "Monochrome image", "This image has a single channel, so it has no colours to edit.");
+                ShowMessage(InfoBarSeverity.Warning, "Monochrome image", "This image has a single channel, so it has no colours to edit, but you can adjust its curves.");
 
             RequestRender();
             UpdateChrome();
@@ -240,7 +250,8 @@ public partial class MainWindow : Window
         {
             var image = _image;
             var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
-            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot)));
+            var curves = _curves.Clone();
+            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves)));
             _path = target;
             _isDirty = false;
             UpdateChrome();
@@ -322,7 +333,7 @@ public partial class MainWindow : Window
     {
         if (!_isDirty || _path is null) return true;
         var choice = await ShowDialogAsync("Save your changes?",
-            $"The colour adjustments to {Path.GetFileName(_path)} have not been saved.",
+            $"The edits to {Path.GetFileName(_path)} have not been saved.",
             "Save as…", "Don't save", "Cancel", DialogResult.Primary);
         return choice switch
         {
@@ -382,16 +393,17 @@ public partial class MainWindow : Window
                 }
 
                 var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
+                var curves = _curves.Clone();
                 var mask = Selected?.Model.Clone();
                 var mode = CompareButton.IsChecked == true ? PreviewMode.Original
-                    : ShowMaskToggle.IsChecked == true && mask is not null ? PreviewMode.Mask
+                    : ShowMaskToggle.IsChecked == true && mask is not null && ColourTab.IsSelected ? PreviewMode.Mask
                     : PreviewMode.Adjusted;
 
                 var cancellation = new CancellationTokenSource();
                 if (layer == full) _fullRenderCancellation = cancellation;
                 try
                 {
-                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, mode, mask, layer.Pixels, cancellation.Token));
+                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token));
                 }
                 catch (OperationCanceledException)
                 {
@@ -436,6 +448,19 @@ public partial class MainWindow : Window
     private void Compare_Click(object? sender, RoutedEventArgs e) => RequestRender();
 
     private void ShowMaskToggle_Toggled(object? sender, RoutedEventArgs e) => RequestRender();
+
+    private void EditorTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Selection changes in the adjustment list bubble up to here too.
+        if (!ReferenceEquals(e.Source, EditorTabs)) return;
+        if (!ColourTab.IsSelected && PickerButton.IsChecked == true)
+        {
+            PickerButton.IsChecked = false;
+            UpdateCursor();
+        }
+        // The selected colour range is only shown while its tab is open.
+        if (ShowMaskToggle.IsChecked == true) RequestRender();
+    }
 
     // ---------------------------------------------------------- colour editor
 
@@ -596,6 +621,61 @@ public partial class MainWindow : Window
         return Color.FromArgb(255, (byte)(r * 255 + 0.5f), (byte)(g * 255 + 0.5f), (byte)(b * 255 + 0.5f));
     }
 
+    // ---------------------------------------------------------------- curves
+
+    private void CurveChannel_Click(object? sender, RoutedEventArgs e)
+    {
+        var channel = sender == CurveRedButton ? CurveChannel.Red
+            : sender == CurveGreenButton ? CurveChannel.Green
+            : sender == CurveBlueButton ? CurveChannel.Blue
+            : CurveChannel.Rgb;
+        ShowCurve(channel);
+    }
+
+    private void ShowCurve(CurveChannel channel)
+    {
+        _curveChannel = channel;
+        CurveRgbButton.IsChecked = channel == CurveChannel.Rgb;
+        CurveRedButton.IsChecked = channel == CurveChannel.Red;
+        CurveGreenButton.IsChecked = channel == CurveChannel.Green;
+        CurveBlueButton.IsChecked = channel == CurveChannel.Blue;
+
+        CurveGraph.Curve = _curves[channel];
+        CurveGraph.Histogram = _histogram?[(int)channel];
+        CurveGraph.CurveColour = channel switch
+        {
+            CurveChannel.Red => Color.FromRgb(0xE8, 0x4A, 0x4F),
+            CurveChannel.Green => Color.FromRgb(0x3F, 0xB9, 0x50),
+            CurveChannel.Blue => Color.FromRgb(0x4C, 0x8D, 0xFF),
+            _ => null,
+        };
+        CurveChannelText.Text = channel == CurveChannel.Rgb ? "RGB curve" : $"{channel} curve";
+    }
+
+    private void CurveGraph_CurveChanged(object? sender, bool interactive)
+    {
+        MarkDirty();
+        RequestRender(interactive);
+    }
+
+    private void ResetCurve_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_curves[_curveChannel].IsIdentity) return;
+        _curves[_curveChannel].Reset();
+        CurveGraph.InvalidateVisual();
+        MarkDirty();
+        RequestRender();
+    }
+
+    private void ResetAllCurves_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_curves.IsIdentity) return;
+        _curves.Reset();
+        CurveGraph.InvalidateVisual();
+        MarkDirty();
+        RequestRender();
+    }
+
     // ------------------------------------------------------------ navigation
 
     private void Fit_Click(object? sender, RoutedEventArgs e) => FitToWindow();
@@ -731,7 +811,7 @@ public partial class MainWindow : Window
                 case Key.B when CompareButton.IsEnabled:
                     ToggleCompare();
                     break;
-                case Key.P when PanelScroller.IsEnabled:
+                case Key.P when ColourPanel.IsEnabled:
                     TogglePicker();
                     break;
                 default:
@@ -773,6 +853,7 @@ public partial class MainWindow : Window
 
     private void TogglePicker()
     {
+        EditorTabs.SelectedItem = ColourTab;
         PickerButton.IsChecked = PickerButton.IsChecked != true;
         UpdateCursor();
     }
@@ -817,7 +898,7 @@ public partial class MainWindow : Window
                     Item("Actual Size", "Meta+D1", ShowActualSize),
                     new NativeMenuItemSeparator(),
                     Item("Show Original (B)", null, ToggleCompare),
-                    Item("Pick Colour (P)", null, () => { if (PanelScroller.IsEnabled) TogglePicker(); }),
+                    Item("Pick Colour (P)", null, () => { if (ColourPanel.IsEnabled) TogglePicker(); }),
                 },
             },
         };
@@ -856,7 +937,10 @@ public partial class MainWindow : Window
     {
         bool loaded = _image is not null;
         EmptyState.IsVisible = !loaded;
-        PanelScroller.IsEnabled = loaded && _image!.IsColour;
+        ColourPanel.IsEnabled = loaded && _image!.IsColour;
+        CurvesPanel.IsEnabled = loaded;
+        // A single-channel image only has the composite curve.
+        CurveRedButton.IsEnabled = CurveGreenButton.IsEnabled = CurveBlueButton.IsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
             ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;
         foreach (var item in _imageMenuItems) item.IsEnabled = loaded;

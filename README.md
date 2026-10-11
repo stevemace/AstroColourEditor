@@ -17,8 +17,12 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    - **Centre hue / Range / Smoothness** set the hue band and how gently it fades.
    - **Protect neutrals** leaves near-grey pixels (background, white stars) alone.
 5. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider label to reset it.
-6. **Before** (B) toggles the original image for comparison.
-7. **Save** (Ctrl+S) overwrites the file after confirmation; **Save as** (Ctrl+Shift+S) writes a new file
+6. On the **Curves** tab, shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
+   channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
+   off the graph to remove it. Moving the end points sets the black and white points. Curves are applied after
+   the colour editor, and also work on monochrome images (RGB curve only).
+7. **Before** (B) toggles the original image for comparison.
+8. **Save** (Ctrl+S) overwrites the file after confirmation; **Save as** (Ctrl+Shift+S) writes a new file
    in the same format as the original.
 
 Navigation: scroll wheel (or trackpad pinch) zooms around the cursor, drag pans (right-drag also pans while the picker is on),
