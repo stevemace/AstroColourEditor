@@ -229,14 +229,16 @@ public sealed class TiffFile : IAstroImage
 
     /// <summary>
     /// Writes the file, replacing the image's pixels with <paramref name="planes"/> (or the current
-    /// <see cref="Planes"/>). The sample format, planar layout and compression are kept; images are
-    /// always written in strips.
+    /// <see cref="Planes"/>) turned by <paramref name="rotation"/>. The sample format, planar layout and
+    /// compression are kept; images are always written in strips.
     /// </summary>
-    public void Save(string path, float[][]? planes = null)
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None)
     {
         planes ??= Planes;
         if (planes.Length != Channels || planes.Any(p => p.Length != PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
+        planes = rotation.Apply(planes, Width, Height);
+        var (width, height) = rotation.Size(Width, Height);
 
         var raw = new byte[Channels][];
         Parallel.For(0, Channels, c => raw[c] = Encode(planes[c]));
@@ -250,8 +252,8 @@ public sealed class TiffFile : IAstroImage
             var compression = WritableCompressions.Contains(Compression) ? Compression : Compression.LZW;
             bool separate = _planarConfig == PlanarConfig.SEPARATE;
 
-            tif.SetField(TiffTag.IMAGEWIDTH, Width);
-            tif.SetField(TiffTag.IMAGELENGTH, Height);
+            tif.SetField(TiffTag.IMAGEWIDTH, width);
+            tif.SetField(TiffTag.IMAGELENGTH, height);
             tif.SetField(TiffTag.SAMPLESPERPIXEL, Channels);
             tif.SetField(TiffTag.BITSPERSAMPLE, BitsPerSample);
             tif.SetField(TiffTag.SAMPLEFORMAT, SampleFormat);
@@ -261,17 +263,24 @@ public sealed class TiffFile : IAstroImage
             if (compression is Compression.LZW or Compression.DEFLATE or Compression.ADOBE_DEFLATE && _predictor > 1)
                 tif.SetField(TiffTag.PREDICTOR, _predictor);
             foreach (var (tag, values) in _metadata)
-                tif.SetField(tag, values);
+            {
+                // A quarter turn swaps the horizontal and vertical resolutions.
+                var target = !rotation.SwapsAxes() ? tag
+                    : tag == TiffTag.XRESOLUTION ? TiffTag.YRESOLUTION
+                    : tag == TiffTag.YRESOLUTION ? TiffTag.XRESOLUTION
+                    : tag;
+                tif.SetField(target, values);
+            }
 
             int samplesPerPixel = separate ? 1 : Channels;
-            int lineBytes = Width * samplesPerPixel * BytesPerSample;
+            int lineBytes = width * samplesPerPixel * BytesPerSample;
             tif.SetField(TiffTag.ROWSPERSTRIP, Math.Max(1, (1 << 20) / lineBytes));
 
             var line = new byte[lineBytes];
             for (int s = 0; s < (separate ? Channels : 1); s++)
-                for (int y = 0; y < Height; y++)
+                for (int y = 0; y < height; y++)
                 {
-                    Gather(raw, s, samplesPerPixel, y * Width, line);
+                    Gather(raw, s, samplesPerPixel, y * width, width, line);
                     if (!tif.WriteScanline(line, y, (short)s))
                         throw new IOException("Could not write the image data.");
                 }
@@ -280,13 +289,13 @@ public sealed class TiffFile : IAstroImage
     }
 
     /// <summary>Interleaves one row of the per-channel arrays into <paramref name="line"/>.</summary>
-    private void Gather(byte[][] raw, int firstChannel, int samplesPerPixel, int firstPixel, byte[] line)
+    private void Gather(byte[][] raw, int firstChannel, int samplesPerPixel, int firstPixel, int width, byte[] line)
     {
         int bps = BytesPerSample;
         for (int k = 0; k < samplesPerPixel; k++)
         {
             var src = raw[firstChannel + k];
-            for (int p = 0, o = k * bps, d = firstPixel * bps; p < Width; p++, o += samplesPerPixel * bps, d += bps)
+            for (int p = 0, o = k * bps, d = firstPixel * bps; p < width; p++, o += samplesPerPixel * bps, d += bps)
                 Buffer.BlockCopy(src, d, line, o, bps);
         }
     }

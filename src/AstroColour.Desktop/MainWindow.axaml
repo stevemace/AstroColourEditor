@@ -83,6 +83,13 @@
                 </StackPanel>
             </Button>
             <Rectangle Classes="separator" />
+            <Button x:Name="RotateLeftButton" Classes="tool" Click="RotateLeft_Click">
+                <controls:LineIcon Data="M2,8 A6,6 0 1 0 8,2 C6.32,2 4.71,2.67 3.51,3.83 L2,5.33 M2,2 V5.33 H5.33" />
+            </Button>
+            <Button x:Name="RotateRightButton" Classes="tool" Click="RotateRight_Click">
+                <controls:LineIcon Data="M14,8 A6,6 0 1 1 8,2 C9.68,2 11.29,2.67 12.49,3.83 L14,5.33 M14,2 V5.33 H10.67" />
+            </Button>
+            <Rectangle Classes="separator" />
             <Button x:Name="FitButton" Classes="tool" Click="Fit_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M1.5,5.5 V1.5 H5.5 M10.5,1.5 H14.5 V5.5 M14.5,10.5 V14.5 H10.5 M5.5,14.5 H1.5 V10.5" />
@@ -118,7 +125,10 @@
                            PointerExited="ImageHost_PointerExited"
                            PointerWheelChanged="ImageHost_PointerWheelChanged"
                            PointerTouchPadGestureMagnify="ImageHost_Magnify">
-                        <Image x:Name="PreviewImage" Stretch="Fill" />
+                        <!-- Rotation is shown here and only applied to the pixels on saving. -->
+                        <LayoutTransformControl x:Name="ImageRotator">
+                            <Image x:Name="PreviewImage" Stretch="Fill" />
+                        </LayoutTransformControl>
                     </Panel>
                 </ScrollViewer>
 

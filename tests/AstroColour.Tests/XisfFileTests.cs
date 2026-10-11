@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using AstroColour.Core;
 using AstroColour.Core.Xisf;
 using K4os.Compression.LZ4;
 
@@ -28,7 +29,7 @@ public class XisfFileTests : IDisposable
     }
 
     /// <summary>Builds a monolithic XISF file by hand with one attached image block.</summary>
-    private string WriteXisf(byte[] block, string imageAttributes, string extraXml = "", byte[]? extraBlock = null)
+    private string WriteXisf(byte[] block, string imageAttributes, string extraXml = "", byte[]? extraBlock = null, string imageChildren = "")
     {
         const int dataStart = 4096;
         int extraStart = dataStart + block.Length;
@@ -36,7 +37,7 @@ public class XisfFileTests : IDisposable
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
             "<xisf version=\"1.0\" xmlns=\"http://www.pixinsight.com/xisf\">" +
             $"<Image geometry=\"{W}:{H}:{C}\" colorSpace=\"RGB\" location=\"attachment:{dataStart}:{block.Length}\" {imageAttributes}>" +
-            "<FITSKeyword name=\"OBJECT\" value=\"'M42'\" comment=\"\"/>" +
+            "<FITSKeyword name=\"OBJECT\" value=\"'M42'\" comment=\"\"/>" + imageChildren +
             (extraBlock is null ? "" : $"<ICCProfile location=\"attachment:{extraStart}:{extraBlock.Length}\"/>") +
             "</Image>" + extraXml +
             "</xisf>";
@@ -125,6 +126,29 @@ public class XisfFileTests : IDisposable
         var f = XisfFile.Load(WriteXisf(block,
             $"sampleFormat=\"Float32\" compression=\"zlib+sh:{raw.Length}:4\" subblocks=\"{a.Length},{half}:{b.Length},{raw.Length - half}\""));
         AssertMatchesExpected(f);
+    }
+
+    [Fact]
+    public void Saving_rotated_swaps_geometry_and_drops_astrometry()
+    {
+        var withWcs = XisfFile.Load(WriteXisf(Float32Planar(), "sampleFormat=\"Float32\" bounds=\"0:1\"",
+            imageChildren: "<FITSKeyword name=\"CRPIX1\" value=\"3.5\" comment=\"\"/>" +
+                "<Property id=\"PCL:AstrometricSolution:ReferenceImageCoordinates\" type=\"F64Vector\" length=\"2\" location=\"inline:base64\">" +
+                Convert.ToBase64String(new byte[16]) + "</Property>"));
+
+        var output = Path.Combine(_dir, "rotated.xisf");
+        withWcs.Save(output, rotation: Rotation.Anticlockwise);
+
+        var reloaded = XisfFile.Load(output);
+        Assert.Equal((H, W), (reloaded.Width, reloaded.Height));
+        var expected = Rotation.Anticlockwise.Apply(withWcs.Planes, W, H);
+        for (int c = 0; c < C; c++)
+            Assert.Equal(expected[c], reloaded.Planes[c]);
+
+        var saved = ReadHeader(output).Root!.Element(XisfFile.Ns + "Image")!;
+        Assert.Equal($"{H}:{W}:{C}", (string?)saved.Attribute("geometry"));
+        Assert.Equal(["OBJECT"], saved.Elements(XisfFile.Ns + "FITSKeyword").Select(k => (string?)k.Attribute("name")));
+        Assert.Empty(saved.Elements(XisfFile.Ns + "Property"));
     }
 
     [Theory]

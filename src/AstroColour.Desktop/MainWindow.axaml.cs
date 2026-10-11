@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly CurveSet _curves = new();
     private CurveChannel _curveChannel = CurveChannel.Rgb;
     private float[][]? _histogram;
+    private Rotation _rotation;
 
     // Images longer than this are previewed at reduced size while sliders move.
     private const int ProxyMaxSide = 2400;
@@ -75,6 +76,8 @@ public partial class MainWindow : Window
         SetShortcutTip(OpenButton, "Open an XISF, FITS or TIFF image", "O");
         SetShortcutTip(SaveButton, "Save over the current file", "S");
         SetShortcutTip(SaveAsButton, "Save to a new file", "S", shift: true);
+        SetShortcutTip(RotateLeftButton, "Rotate 90° anticlockwise", "[");
+        SetShortcutTip(RotateRightButton, "Rotate 90° clockwise", "]");
         SetShortcutTip(FitButton, "Fit the image to the window", "0");
         SetShortcutTip(ActualSizeButton, "View at actual pixels", "1");
         ToolTip.SetTip(CompareButton, "Show the original, unedited image (B)");
@@ -178,6 +181,7 @@ public partial class MainWindow : Window
             _adjustments.Clear();
             _curves.Reset();
             _histogram = histogram;
+            SetRotation(Rotation.None);
             ShowCurve(CurveChannel.Rgb);
             ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
@@ -251,7 +255,8 @@ public partial class MainWindow : Window
             var image = _image;
             var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
             var curves = _curves.Clone();
-            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves)));
+            var rotation = _rotation;
+            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves), rotation));
             _path = target;
             _isDirty = false;
             UpdateChrome();
@@ -676,6 +681,39 @@ public partial class MainWindow : Window
         RequestRender();
     }
 
+    // -------------------------------------------------------------- rotation
+
+    private void RotateLeft_Click(object? sender, RoutedEventArgs e) => Rotate(-1);
+
+    private void RotateRight_Click(object? sender, RoutedEventArgs e) => Rotate(1);
+
+    /// <summary>Turns the view by quarter turns, keeping a fitted image fitted and otherwise the centre in place.</summary>
+    private void Rotate(int quarterTurns)
+    {
+        if (_image is null) return;
+        bool fitted = Math.Abs(_zoom / FitZoom(Viewer.Bounds.Size) - 1) < 0.002;
+        var centre = new Point(Viewer.Viewport.Width / 2, Viewer.Viewport.Height / 2);
+        var anchor = Viewer.TranslatePoint(centre, PreviewImage);
+
+        SetRotation(_rotation.Turn(quarterTurns));
+        MarkDirty();
+
+        if (fitted)
+        {
+            FitToWindow();
+            return;
+        }
+        Viewer.UpdateLayout();
+        if (anchor is { } a && PreviewImage.TranslatePoint(a, Viewer) is { } moved)
+            Viewer.Offset += moved - centre;
+    }
+
+    private void SetRotation(Rotation rotation)
+    {
+        _rotation = rotation;
+        ImageRotator.LayoutTransform = rotation == Rotation.None ? null : new RotateTransform(rotation.Degrees());
+    }
+
     // ------------------------------------------------------------ navigation
 
     private void Fit_Click(object? sender, RoutedEventArgs e) => FitToWindow();
@@ -697,8 +735,12 @@ public partial class MainWindow : Window
     }
 
     /// <summary>The zoom that shows the whole image in a viewport of the given size.</summary>
-    private double FitZoom(Size viewport) =>
-        _image is null ? 1 : Math.Min(viewport.Width / _image.Width, viewport.Height / _image.Height) * 0.98;
+    private double FitZoom(Size viewport)
+    {
+        if (_image is null) return 1;
+        var (width, height) = _rotation.Size(_image.Width, _image.Height);
+        return Math.Min(viewport.Width / width, viewport.Height / height) * 0.98;
+    }
 
     private void SetZoom(double zoom)
     {
@@ -839,6 +881,12 @@ public partial class MainWindow : Window
             case Key.D1 or Key.NumPad1 when !shift:
                 ShowActualSize();
                 break;
+            case Key.OemOpenBrackets when !shift:
+                Rotate(-1);
+                break;
+            case Key.OemCloseBrackets when !shift:
+                Rotate(1);
+                break;
             default:
                 return;
         }
@@ -897,6 +945,9 @@ public partial class MainWindow : Window
                     Item("Fit to Window", "Meta+D0", FitToWindow),
                     Item("Actual Size", "Meta+D1", ShowActualSize),
                     new NativeMenuItemSeparator(),
+                    Item("Rotate Left", "Meta+OemOpenBrackets", () => Rotate(-1)),
+                    Item("Rotate Right", "Meta+OemCloseBrackets", () => Rotate(1)),
+                    new NativeMenuItemSeparator(),
                     Item("Show Original (B)", null, ToggleCompare),
                     Item("Pick Colour (P)", null, () => { if (ColourPanel.IsEnabled) TogglePicker(); }),
                 },
@@ -942,6 +993,7 @@ public partial class MainWindow : Window
         // A single-channel image only has the composite curve.
         CurveRedButton.IsEnabled = CurveGreenButton.IsEnabled = CurveBlueButton.IsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
+            RotateLeftButton.IsEnabled = RotateRightButton.IsEnabled =
             ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;
         foreach (var item in _imageMenuItems) item.IsEnabled = loaded;
 

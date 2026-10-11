@@ -217,6 +217,34 @@ public class FitsFileTests : IDisposable
                 Assert.Equal(Math.Round(edited[c][i] * 65535) / 65535, reloaded.Planes[c][i], 6);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveRotatedSwapsAxesAndDropsWcs(bool bottomUp)
+    {
+        var extra = new List<string> { Card("CRPIX1", 3.5), Card("CD1_1", 0.001), Card("CTYPE1", "RA---TAN") };
+        if (bottomUp) extra.Add(Card("ROWORDER", "BOTTOM-UP"));
+        var path = Write(Hdu(ImageCards(-32, 3, true, [.. extra]), Samples(-32, 3, (c, i) => Fraction(c, i))));
+        var f = FitsFile.Load(path);
+
+        var output = Path.Combine(_dir, "rotated.fits");
+        f.Save(output, rotation: Rotation.Clockwise);
+
+        string header = Encoding.ASCII.GetString(File.ReadAllBytes(output), 0, 2880);
+        Assert.Contains(Card("NAXIS1", H), header);
+        Assert.Contains(Card("NAXIS2", W), header);
+        Assert.Contains(Card("OBJECT", "M42", "target"), header);
+        Assert.DoesNotContain("CRPIX1", header);
+        Assert.DoesNotContain("CD1_1", header);
+        Assert.DoesNotContain("CTYPE1", header);
+
+        var reloaded = FitsFile.Load(output);
+        Assert.Equal((H, W, bottomUp), (reloaded.Width, reloaded.Height, reloaded.BottomUp));
+        var expected = Rotation.Clockwise.Apply(f.Planes, W, H);
+        for (int c = 0; c < 3; c++)
+            Assert.Equal(expected[c], reloaded.Planes[c]);
+    }
+
     [Fact]
     public void RejectsFilesThatAreNotFits()
     {

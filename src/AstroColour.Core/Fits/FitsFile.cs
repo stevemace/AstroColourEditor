@@ -271,26 +271,34 @@ public sealed class FitsFile : IAstroImage
 
     /// <summary>
     /// Writes the file, replacing the image's pixels with <paramref name="planes"/> (or the current
-    /// <see cref="Planes"/>). The sample format, scaling and row order are kept; checksums, which
-    /// would no longer match, are removed.
+    /// <see cref="Planes"/>) turned by <paramref name="rotation"/>. The sample format, scaling and row
+    /// order are kept; checksums, which would no longer match, are removed, as is the WCS of a rotated image.
     /// </summary>
-    public void Save(string path, float[][]? planes = null)
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None)
     {
         planes ??= Planes;
         if (planes.Length != Channels || planes.Any(p => p.Length != PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
+        planes = rotation.Apply(planes, Width, Height);
+        var (width, height) = rotation.Size(Width, Height);
 
         var header = new StringBuilder();
         foreach (var card in _cards)
         {
             string key = card[..8].TrimEnd();
             if (key is "CHECKSUM" or "DATASUM") continue;
-            header.Append(card);
+            if (rotation != Rotation.None && card[8..10] == "= " && RotationExtensions.IsWcsKeyword(key)) continue;
+            header.Append(key switch
+            {
+                "NAXIS1" when rotation.SwapsAxes() => IntegerCard(card, width),
+                "NAXIS2" when rotation.SwapsAxes() => IntegerCard(card, height),
+                _ => card,
+            });
         }
         header.Append("END".PadRight(CardSize));
         while (header.Length % BlockSize != 0) header.Append(' ');
 
-        byte[] data = EncodeSamples(planes);
+        byte[] data = EncodeSamples(planes, width, height);
 
         string fullPath = Path.GetFullPath(path);
         string tempPath = fullPath + ".tmp";
@@ -305,7 +313,15 @@ public sealed class FitsFile : IAstroImage
         File.Move(tempPath, fullPath, overwrite: true);
     }
 
-    private byte[] EncodeSamples(float[][] planes)
+    /// <summary>A fixed-format integer card with the same keyword and comment as <paramref name="card"/>.</summary>
+    private static string IntegerCard(string card, int value)
+    {
+        int slash = card.IndexOf('/', 10);
+        string comment = slash >= 0 ? " " + card[slash..].TrimEnd() : "";
+        return (card[..8] + "= " + value.ToString(CultureInfo.InvariantCulture).PadLeft(20) + comment).PadRight(CardSize)[..CardSize];
+    }
+
+    private byte[] EncodeSamples(float[][] planes, int width, int height)
     {
         int n = PixelCount;
         int bps = Math.Abs(Bitpix) / 8;
@@ -316,11 +332,11 @@ public sealed class FitsFile : IAstroImage
         {
             var plane = planes[c];
             var bytes = new Span<byte>(data, c * n * bps, n * bps);
-            for (int y = 0; y < Height; y++)
+            for (int y = 0; y < height; y++)
             {
-                int srcRow = y * Width;
-                int dstRow = (BottomUp ? Height - 1 - y : y) * Width;
-                for (int x = 0; x < Width; x++)
+                int srcRow = y * width;
+                int dstRow = (BottomUp ? height - 1 - y : y) * width;
+                for (int x = 0; x < width; x++)
                 {
                     var s = bytes.Slice((dstRow + x) * bps, bps);
                     double stored = (plane[srcRow + x] * range + _low - _bzero) / _bscale;

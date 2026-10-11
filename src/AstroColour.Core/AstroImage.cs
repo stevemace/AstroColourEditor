@@ -21,8 +21,11 @@ public interface IAstroImage
     bool IsColour => Channels >= 3;
     int PixelCount => Width * Height;
 
-    /// <summary>Writes the file in its original format, replacing the pixels with <paramref name="planes"/> if given.</summary>
-    void Save(string path, float[][]? planes = null);
+    /// <summary>
+    /// Writes the file in its original format, replacing the pixels with <paramref name="planes"/> if given,
+    /// and then turning the image by <paramref name="rotation"/>. A rotated image loses its astrometric solution.
+    /// </summary>
+    void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None);
 }
 
 public static class AstroImageFile

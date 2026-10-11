@@ -127,6 +127,33 @@ public class TiffFileTests : IDisposable
         Assert.Equal(2, tif.GetField(TiffTag.PREDICTOR)[0].ToInt());
     }
 
+    [Theory]
+    [InlineData(PlanarConfig.CONTIG)]
+    [InlineData(PlanarConfig.SEPARATE)]
+    public void SavesRotatedImageWithSwappedSizeAndResolution(PlanarConfig planar)
+    {
+        var path = Write(3, 16, SampleFormat.UINT, (c, i) => Math.Round(Fraction(c, i) * 65535), planar: planar,
+            extraTags: tif =>
+            {
+                tif.SetField(TiffTag.XRESOLUTION, 300.0);
+                tif.SetField(TiffTag.YRESOLUTION, 150.0);
+            });
+        var f = TiffFile.Load(path);
+
+        var output = Output();
+        f.Save(output, rotation: Rotation.Clockwise);
+        var g = TiffFile.Load(output);
+
+        Assert.Equal((H, W), (g.Width, g.Height));
+        var expected = Rotation.Clockwise.Apply(f.Planes, W, H);
+        for (int c = 0; c < 3; c++)
+            Assert.Equal(expected[c], g.Planes[c]);
+
+        using var tif = LibTiff.Open(output, "r");
+        Assert.Equal(150f, tif.GetField(TiffTag.XRESOLUTION)[0].ToFloat());
+        Assert.Equal(300f, tif.GetField(TiffTag.YRESOLUTION)[0].ToFloat());
+    }
+
     [Fact]
     public void RoundTripsPlanarFloat32WithDeflateAndFloatingPointPredictor()
     {

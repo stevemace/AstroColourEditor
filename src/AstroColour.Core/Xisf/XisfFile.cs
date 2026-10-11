@@ -313,26 +313,40 @@ public sealed class XisfFile : IAstroImage
 
     /// <summary>
     /// Writes the file, replacing the main image's pixels with <paramref name="planes"/>
-    /// (or the current <see cref="Planes"/>). The image keeps its original sample format and
-    /// is stored uncompressed and planar; all other header content is preserved.
+    /// (or the current <see cref="Planes"/>) turned by <paramref name="rotation"/>. The image keeps its
+    /// original sample format and is stored uncompressed and planar; all other header content is preserved,
+    /// except that a rotated image loses its astrometric solution.
     /// </summary>
-    public void Save(string path, float[][]? planes = null)
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None)
     {
         planes ??= Planes;
         if (planes.Length != Channels || planes.Any(p => p.Length != PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
+        planes = rotation.Apply(planes, Width, Height);
 
         var doc = new XDocument(_header);
         var root = doc.Root!;
         var all = root.DescendantsAndSelf().ToList();
         var image = root.Elements(Ns + "Image").ElementAt(_imageIndex);
 
+        if (rotation != Rotation.None)
+        {
+            var (width, height) = rotation.Size(Width, Height);
+            image.SetAttributeValue("geometry", $"{width}:{height}:{Channels}");
+            image.Elements(Ns + "FITSKeyword")
+                .Where(k => RotationExtensions.IsWcsKeyword((string?)k.Attribute("name") ?? ""))
+                .Remove();
+            image.Elements(Ns + "Property")
+                .Where(p => ((string?)p.Attribute("id"))?.StartsWith("PCL:AstrometricSolution", StringComparison.Ordinal) == true)
+                .Remove();
+        }
+
         var blocks = new List<(XElement Element, byte[] Data)> { (image, EncodeSamples(planes)) };
         foreach (var (index, data) in _otherAttachments)
         {
             var el = all[index];
-            // Thumbnails would no longer match the edited image, so they are dropped.
-            if (el.AncestorsAndSelf().Any(a => a.Name.LocalName == "Thumbnail")) continue;
+            // Thumbnails would no longer match the edited image, so they are dropped, as are removed properties.
+            if (el.AncestorsAndSelf().Any(a => a.Name.LocalName == "Thumbnail") || el.Document != doc) continue;
             blocks.Add((el, data));
         }
         root.Descendants(Ns + "Thumbnail").ToList().Remove();
