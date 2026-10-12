@@ -44,6 +44,26 @@ public partial class LabeledSlider : UserControl
 
     public double DefaultValue { get; set; }
 
+    /// <summary>The increment the slider snaps to.</summary>
+    public double Step
+    {
+        get => Slider.TickFrequency;
+        set => Slider.TickFrequency = value;
+    }
+
+    /// <summary>Decimal places shown in the value readout.</summary>
+    public int Decimals
+    {
+        get => _decimals;
+        set
+        {
+            _decimals = value;
+            UpdateValueText();
+        }
+    }
+
+    private int _decimals;
+
     public string Unit { get; set; } = "";
 
     /// <summary>Show a leading "+" for positive values (for relative adjustments).</summary>
@@ -69,8 +89,8 @@ public partial class LabeledSlider : UserControl
 
     private void UpdateValueText()
     {
-        double v = Math.Round(Slider.Value);
+        double v = Math.Round(Slider.Value, _decimals);
         string sign = ShowSign && v > 0 ? "+" : "";
-        ValueText.Text = sign + v.ToString(CultureInfo.CurrentCulture) + Unit;
+        ValueText.Text = sign + v.ToString("F" + _decimals, CultureInfo.CurrentCulture) + Unit;
     }
 }

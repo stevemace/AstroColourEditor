@@ -250,6 +250,36 @@
                                                  Hint="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points. Curves are applied after the colour editor." />
                         </ScrollViewer>
                     </TabItem>
+
+                    <TabItem x:Name="StarsTab" Header="Stars">
+                        <ScrollViewer x:Name="StarsPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
+                            <StackPanel Margin="12,8,16,16" Spacing="12">
+                                <Button x:Name="LoadStarsButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                        Click="LoadStars_Click" ToolTip.Tip="Open a stars-only image the same size as this one">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <controls:LineIcon Data="M8,1.5 L9.8,6.2 L14.5,8 L9.8,9.8 L8,14.5 L6.2,9.8 L1.5,8 L6.2,6.2 Z" />
+                                        <TextBlock x:Name="LoadStarsText" Text="Add stars image…" />
+                                    </StackPanel>
+                                </Button>
+                                <TextBlock TextWrapping="Wrap" Classes="caption secondary"
+                                           Text="Add the stars back over this (starless) image with the pixel math ~((~starless) * (~(stars * x))). The stars image must be the same size as this image, and goes on after the colour editor and curves." />
+
+                                <StackPanel x:Name="StarsEditor" Spacing="8" IsVisible="False">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock x:Name="StarsFileText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <Button Grid.Column="1" Padding="6" Background="Transparent" BorderThickness="0"
+                                                Click="RemoveStars_Click" ToolTip.Tip="Remove the stars">
+                                            <controls:LineIcon Width="14" Height="14"
+                                                  Data="M2,3.5 H12 M5,3.5 V1.5 H9 V3.5 M3.5,3.5 L4.2,12.5 H9.8 L10.5,3.5" />
+                                        </Button>
+                                    </Grid>
+                                    <controls:LabeledSlider x:Name="StarBrightnessSlider" Label="Star brightness (x)" Minimum="0" Maximum="1"
+                                                            Step="0.01" Decimals="2" DefaultValue="1" Value="1"
+                                                            ValueChanged="StarBrightnessSlider_ValueChanged" />
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
                 </TabControl>
             </Border>
         </Grid>

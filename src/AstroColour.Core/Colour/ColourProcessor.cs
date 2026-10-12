@@ -1,12 +1,13 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AstroColour.Core.Curves;
+using AstroColour.Core.Stars;
 
 namespace AstroColour.Core.Colour;
 
 public enum PreviewMode
 {
-    /// <summary>The image with all adjustments and curves applied.</summary>
+    /// <summary>The image with all adjustments, curves and stars applied.</summary>
     Adjusted,
     /// <summary>The unedited image, for before/after comparison.</summary>
     Original,
@@ -18,16 +19,19 @@ public static class ColourProcessor
 {
     /// <summary>
     /// Renders the image into an 8-bit BGRA buffer of Width×Height×4 bytes. Colour adjustments are
-    /// applied first, then <paramref name="curves"/>.
+    /// applied first, then <paramref name="curves"/>, then <paramref name="stars"/> (which must match the image's size).
     /// </summary>
     public static void RenderPreview(RgbImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves,
-        PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default)
+        PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default, StarLayer? stars = null)
     {
         var set = new AdjustmentSet(adjustments);
         var maskSet = mode == PreviewMode.Mask && mask is not null ? new AdjustmentSet([mask], includeAll: true) : null;
         var lookup = mode == PreviewMode.Adjusted && curves is not null ? new CurveLookup(curves) : null;
         if (lookup is { IsEmpty: true }) lookup = null;
         if (mode == PreviewMode.Original) set = new AdjustmentSet([]);
+        if (mode != PreviewMode.Adjusted || stars is { IsEmpty: true }) stars = null;
+        if (stars is not null && !stars.Fits(image.Width, image.Height))
+            throw new ArgumentException("The stars image is not the same size as the image.", nameof(stars));
 
         float[] rp = image.R, gp = image.G, bp = image.B;
         int width = image.Width;
@@ -56,6 +60,7 @@ public static class ColourProcessor
                 {
                     set.Adjust(ref r, ref g, ref b);
                     lookup?.Apply(ref r, ref g, ref b);
+                    stars?.Apply(i, ref r, ref g, ref b);
                 }
 
                 output[i] = 0xFF000000u | (uint)ToByte(r) << 16 | (uint)ToByte(g) << 8 | ToByte(b);
@@ -63,28 +68,39 @@ public static class ColourProcessor
         });
     }
 
-    /// <summary>Applies the adjustments and then the curves at full precision, returning new planes for saving.</summary>
-    public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves = null)
+    /// <summary>
+    /// Applies the adjustments, then the curves, then the stars at full precision, returning new planes for saving.
+    /// A single-channel image takes the stars' luminance.
+    /// </summary>
+    public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves = null,
+        StarLayer? stars = null)
     {
         var planes = image.Planes.Select(p => (float[])p.Clone()).ToArray();
         var lookup = curves is null ? null : new CurveLookup(curves, monochrome: !image.IsColour);
         if (lookup is { IsEmpty: true }) lookup = null;
+        if (stars is { IsEmpty: true }) stars = null;
+        if (stars is not null && !stars.Fits(image.Width, image.Height))
+            throw new ArgumentException("The stars image is not the same size as the image.", nameof(stars));
         int width = image.Width;
 
         if (!image.IsColour)
         {
-            if (lookup is null) return planes;
+            if (lookup is null && stars is null) return planes;
             float[] p = planes[0];
             Parallel.For(0, image.Height, [MethodImpl(MethodImplOptions.AggressiveOptimization)] (int y) =>
             {
                 int row = y * width;
-                for (int i = row; i < row + width; i++) p[i] = lookup.ApplyMono(p[i]);
+                for (int i = row; i < row + width; i++)
+                {
+                    float v = lookup?.ApplyMono(p[i]) ?? p[i];
+                    p[i] = stars?.ApplyMono(i, v) ?? v;
+                }
             });
             return planes;
         }
 
         var set = new AdjustmentSet(adjustments);
-        if (set.IsEmpty && lookup is null) return planes;
+        if (set.IsEmpty && lookup is null && stars is null) return planes;
 
         float[] rp = planes[0], gp = planes[1], bp = planes[2];
         Parallel.For(0, image.Height, [MethodImpl(MethodImplOptions.AggressiveOptimization)] (int y) =>
@@ -97,6 +113,11 @@ public static class ColourProcessor
                 if (lookup is not null)
                 {
                     lookup.Apply(ref r, ref g, ref b);
+                    changed = true;
+                }
+                if (stars is not null)
+                {
+                    stars.Apply(i, ref r, ref g, ref b);
                     changed = true;
                 }
                 if (changed)

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using AstroColour.Core;
 using AstroColour.Core.Colour;
 using AstroColour.Core.Curves;
+using AstroColour.Core.Stars;
 using AstroColour.Desktop.Controls;
 using Avalonia;
 using Avalonia.Controls;
@@ -33,6 +34,10 @@ public partial class MainWindow : Window
     private string? _path;
     private PreviewLayer? _full;
     private PreviewLayer? _proxy;
+    private int _proxyFactor = 1;
+
+    // Stars-only image added back over the edited image, at full resolution.
+    private RgbImage? _stars;
 
     private readonly DispatcherTimer _settleTimer;
     private CancellationTokenSource? _fullRenderCancellation;
@@ -98,6 +103,8 @@ public partial class MainWindow : Window
     private sealed class PreviewLayer(RgbImage source)
     {
         public RgbImage Source { get; } = source;
+        /// <summary>The stars image at this layer's size, if one is loaded.</summary>
+        public RgbImage? Stars { get; set; }
         public byte[] Pixels { get; } = new byte[source.PixelCount * 4];
         public WriteableBitmap Bitmap { get; } =
             new(new PixelSize(source.Width, source.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
@@ -164,13 +171,13 @@ public partial class MainWindow : Window
         SetBusy("Loading image…");
         try
         {
-            var (image, rgb, proxy, median, histogram) = await Task.Run(() =>
+            var (image, rgb, proxy, factor, median, histogram) = await Task.Run(() =>
             {
                 var img = AstroImageFile.Load(path);
                 var full = RgbImage.From(img);
                 int factor = (int)Math.Ceiling(Math.Max(img.Width, img.Height) / (double)ProxyMaxSide);
                 var small = factor > 1 ? full.Downsample(factor) : null;
-                return (img, full, small, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full));
+                return (img, full, small, factor, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full));
             });
 
             _image = image;
@@ -188,7 +195,9 @@ public partial class MainWindow : Window
 
             _full = new PreviewLayer(rgb);
             _proxy = proxy is null ? null : new PreviewLayer(proxy);
+            _proxyFactor = factor;
             _proxyPending = false;
+            SetStars(null, null, null);
             PreviewImage.Source = _full.Bitmap;
             SetZoom(1 / RenderScaling);
 
@@ -254,8 +263,9 @@ public partial class MainWindow : Window
             var image = _image;
             var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
             var curves = _curves.Clone();
+            var stars = _stars is null ? null : new StarLayer(_stars, StarBrightness);
             var rotation = _rotation;
-            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves), rotation));
+            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves, stars), rotation));
             _path = target;
             _isDirty = false;
             UpdateChrome();
@@ -399,6 +409,7 @@ public partial class MainWindow : Window
                 var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
                 var curves = _curves.Clone();
                 var mask = Selected?.Model.Clone();
+                var stars = layer.Stars is null ? null : new StarLayer(layer.Stars, StarBrightness);
                 var mode = CompareButton.IsChecked == true ? PreviewMode.Original
                     : ShowMaskToggle.IsChecked == true && mask is not null && ColourTab.IsSelected ? PreviewMode.Mask
                     : PreviewMode.Adjusted;
@@ -407,7 +418,7 @@ public partial class MainWindow : Window
                 if (layer == full) _fullRenderCancellation = cancellation;
                 try
                 {
-                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token));
+                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars));
                 }
                 catch (OperationCanceledException)
                 {
@@ -667,6 +678,77 @@ public partial class MainWindow : Window
     {
         MarkDirty();
         RequestRender(interactive);
+    }
+
+    // ----------------------------------------------------------------- stars
+
+    private float StarBrightness => (float)StarBrightnessSlider.Value;
+
+    private void LoadStars_Click(object? sender, RoutedEventArgs e) => _ = RunFileActionAsync(async () =>
+    {
+        if (_image is null) return;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Add stars image",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("XISF, FITS or TIFF image") { Patterns = [.. AstroImageFile.AllExtensions.Select(x => "*" + x)] }],
+            SuggestedStartLocation = await StartFolderAsync(),
+        });
+        if (files is not [var file] || file.TryGetLocalPath() is not { } path) return;
+
+        SetBusy("Loading stars…");
+        try
+        {
+            var image = _image;
+            int factor = _proxyFactor;
+            var (full, proxy) = await Task.Run(() =>
+            {
+                var stars = AstroImageFile.Load(path);
+                if (stars.Width != image.Width || stars.Height != image.Height)
+                    throw new InvalidDataException(
+                        $"The stars image is {stars.Width} × {stars.Height}, but this image is {image.Width} × {image.Height}. They must be the same size.");
+                var rgb = RgbImage.From(stars);
+                return (rgb, factor > 1 ? rgb.Downsample(factor) : null);
+            });
+            if (image != _image) return; // a different file was opened meanwhile
+            SetStars(full, proxy, path);
+            MarkDirty();
+            RequestRender();
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorAsync("Could not add the stars", ex.Message);
+        }
+        finally
+        {
+            ClearBusy();
+        }
+    });
+
+    private void RemoveStars_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_stars is null) return;
+        SetStars(null, null, null);
+        MarkDirty();
+        RequestRender();
+    }
+
+    private void SetStars(RgbImage? full, RgbImage? proxy, string? path)
+    {
+        _stars = full;
+        if (_full is not null) _full.Stars = full;
+        if (_proxy is not null) _proxy.Stars = proxy;
+        StarsEditor.IsVisible = full is not null;
+        StarsFileText.Text = path is null ? "" : Path.GetFileName(path);
+        ToolTip.SetTip(StarsFileText, path);
+        LoadStarsText.Text = full is null ? "Add stars image…" : "Replace stars image…";
+    }
+
+    private void StarBrightnessSlider_ValueChanged(object? sender, EventArgs e)
+    {
+        if (_stars is null) return;
+        MarkDirty();
+        RequestRender(interactive: true);
     }
 
     // -------------------------------------------------------------- rotation
@@ -978,6 +1060,7 @@ public partial class MainWindow : Window
         EmptyState.IsVisible = !loaded;
         ColourPanel.IsEnabled = loaded && _image!.IsColour;
         CurvesPanel.IsEnabled = loaded;
+        StarsPanel.IsEnabled = loaded;
         // A single-channel image only has the composite curve.
         ImageCurves.ChannelsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =

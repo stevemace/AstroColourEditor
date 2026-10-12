@@ -22,12 +22,16 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
    off the graph to remove it. Moving the end points sets the black and white points. Curves are applied after
    the colour editor, and also work on monochrome images (RGB curve only).
-7. **Rotate left / right** (Ctrl+[ / Ctrl+]) turns the image 90° at a time; the rotation is applied when you save.
+7. On the **Stars** tab, **Add stars image…** loads a stars-only image (e.g. from StarXTerminator) the same size as
+   the open (starless) image and adds it back with the pixel math `~((~starless) * (~(stars * x)))`. The
+   **Star brightness (x)** slider (0–1) sets how bright the stars are. Stars go on after the colour editor and
+   curves, are hidden by **Before**, and are blended into the saved image. A mono image takes the stars' luminance.
+8. **Rotate left / right** (Ctrl+[ / Ctrl+]) turns the image 90° at a time; the rotation is applied when you save.
    A rotated image's astrometric solution (WCS keywords and PixInsight astrometry properties) no longer
    matches its pixels, so it is removed on saving — plate-solve the saved image again if you need one.
-8. **Before** (B) toggles the original image for comparison.
-9. **Save** (Ctrl+S) overwrites the file after confirmation; **Save as** (Ctrl+Shift+S) writes a new file
-   in the same format as the original.
+9. **Before** (B) toggles the original image for comparison.
+10. **Save** (Ctrl+S) overwrites the file after confirmation; **Save as** (Ctrl+Shift+S) writes a new file
+    in the same format as the original.
 
 Navigation: scroll wheel (or trackpad pinch) zooms around the cursor, drag pans (right-drag also pans while the picker is on),
 **Fit** (Ctrl+0) and **100%** (Ctrl+1).
