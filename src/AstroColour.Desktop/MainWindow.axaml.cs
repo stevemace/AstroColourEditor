@@ -22,8 +22,7 @@ public partial class MainWindow : Window
 
     private readonly ObservableCollection<AdjustmentItem> _adjustments = [];
     private readonly CurveSet _curves = new();
-    private CurveChannel _curveChannel = CurveChannel.Rgb;
-    private float[][]? _histogram;
+    private bool _preferColourCurves; // edit newly picked colours with curves rather than HSL
     private Rotation _rotation;
 
     // Images longer than this are previewed at reduced size while sliders move.
@@ -71,7 +70,7 @@ public partial class MainWindow : Window
         PositionChanged += (_, _) => TrackRestoredBounds();
         AdjustmentList.ItemsSource = _adjustments;
         TargetHueSlider.GradientBrush = HueRamp(0, 360);
-        ShowCurve(CurveChannel.Rgb);
+        ImageCurves.Curves = _curves;
 
         SetShortcutTip(OpenButton, "Open an XISF, FITS or TIFF image", "O");
         SetShortcutTip(SaveButton, "Save over the current file", "S");
@@ -180,9 +179,9 @@ public partial class MainWindow : Window
             _overwriteConfirmed = false;
             _adjustments.Clear();
             _curves.Reset();
-            _histogram = histogram;
+            ImageCurves.Histogram = histogram;
+            ImageCurves.ShowChannel(CurveChannel.Rgb);
             SetRotation(Rotation.None);
-            ShowCurve(CurveChannel.Rgb);
             ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
             if (!image.IsColour) EditorTabs.SelectedItem = CurvesTab;
@@ -491,7 +490,7 @@ public partial class MainWindow : Window
         var item = Selected;
         if (item is null || item.Model.HasEdits)
         {
-            item = new AdjustmentItem(new ColourAdjustment());
+            item = new AdjustmentItem(new ColourAdjustment()) { EditWithCurves = _preferColourCurves };
             item.ActiveChanged += (_, _) => { MarkDirty(); RequestRender(); };
             _adjustments.Add(item);
         }
@@ -534,6 +533,41 @@ public partial class MainWindow : Window
         TargetHueSlider.DefaultValue = Math.Round(ColourMath.Hue(m.SampleR, m.SampleG, m.SampleB)) % 360;
         _suppressEditorEvents = false;
         UpdateSliderRamps();
+
+        ColourCurves.Curves = m.Curves;
+        ShowEditMode(item.EditWithCurves);
+    }
+
+    private void ColourEditMode_Click(object? sender, RoutedEventArgs e)
+    {
+        bool curves = sender == CurvesModeButton;
+        _preferColourCurves = curves;
+        if (Selected is { } item) item.EditWithCurves = curves;
+        ShowEditMode(curves);
+    }
+
+    /// <summary>Shows the HSL sliders or the curves for the selected colour.</summary>
+    private void ShowEditMode(bool curves)
+    {
+        HslModeButton.IsChecked = !curves;
+        CurvesModeButton.IsChecked = curves;
+        HslEditor.IsVisible = !curves;
+        ColourCurves.IsVisible = curves;
+        UpdateSelectionHistogram();
+    }
+
+    /// <summary>Shows the histogram of just the selected colours behind their curves.</summary>
+    private void UpdateSelectionHistogram()
+    {
+        if (!ColourCurves.IsVisible || Selected is not { } item || (_proxy ?? _full) is not { } layer) return;
+        ColourCurves.Histogram = CurveSet.Histogram(layer.Source, selection: item.Model);
+    }
+
+    private void ColourCurves_CurvesChanged(object? sender, bool interactive)
+    {
+        Selected?.Refresh();
+        MarkDirty();
+        RequestRender(interactive);
     }
 
     private void EditorSlider_ValueChanged(object? sender, EventArgs e)
@@ -562,6 +596,7 @@ public partial class MainWindow : Window
         item.Refresh();
 
         if (ReferenceEquals(sender, TargetHueSlider)) UpdateSliderRamps();
+        if (!HslEditor.IsVisible) UpdateSelectionHistogram();
         MarkDirty();
         RequestRender(interactive: true);
     }
@@ -569,7 +604,7 @@ public partial class MainWindow : Window
     private void ResetAdjustment_Click(object? sender, RoutedEventArgs e)
     {
         if (Selected is not { } item) return;
-        item.Model.ResetEdits();
+        item.Model.ResetHsl();
         item.Refresh();
         LoadEditor(item);
         MarkDirty();
@@ -628,57 +663,10 @@ public partial class MainWindow : Window
 
     // ---------------------------------------------------------------- curves
 
-    private void CurveChannel_Click(object? sender, RoutedEventArgs e)
-    {
-        var channel = sender == CurveRedButton ? CurveChannel.Red
-            : sender == CurveGreenButton ? CurveChannel.Green
-            : sender == CurveBlueButton ? CurveChannel.Blue
-            : CurveChannel.Rgb;
-        ShowCurve(channel);
-    }
-
-    private void ShowCurve(CurveChannel channel)
-    {
-        _curveChannel = channel;
-        CurveRgbButton.IsChecked = channel == CurveChannel.Rgb;
-        CurveRedButton.IsChecked = channel == CurveChannel.Red;
-        CurveGreenButton.IsChecked = channel == CurveChannel.Green;
-        CurveBlueButton.IsChecked = channel == CurveChannel.Blue;
-
-        CurveGraph.Curve = _curves[channel];
-        CurveGraph.Histogram = _histogram?[(int)channel];
-        CurveGraph.CurveColour = channel switch
-        {
-            CurveChannel.Red => Color.FromRgb(0xE8, 0x4A, 0x4F),
-            CurveChannel.Green => Color.FromRgb(0x3F, 0xB9, 0x50),
-            CurveChannel.Blue => Color.FromRgb(0x4C, 0x8D, 0xFF),
-            _ => null,
-        };
-        CurveChannelText.Text = channel == CurveChannel.Rgb ? "RGB curve" : $"{channel} curve";
-    }
-
-    private void CurveGraph_CurveChanged(object? sender, bool interactive)
+    private void ImageCurves_CurvesChanged(object? sender, bool interactive)
     {
         MarkDirty();
         RequestRender(interactive);
-    }
-
-    private void ResetCurve_Click(object? sender, RoutedEventArgs e)
-    {
-        if (_curves[_curveChannel].IsIdentity) return;
-        _curves[_curveChannel].Reset();
-        CurveGraph.InvalidateVisual();
-        MarkDirty();
-        RequestRender();
-    }
-
-    private void ResetAllCurves_Click(object? sender, RoutedEventArgs e)
-    {
-        if (_curves.IsIdentity) return;
-        _curves.Reset();
-        CurveGraph.InvalidateVisual();
-        MarkDirty();
-        RequestRender();
     }
 
     // -------------------------------------------------------------- rotation
@@ -991,7 +979,7 @@ public partial class MainWindow : Window
         ColourPanel.IsEnabled = loaded && _image!.IsColour;
         CurvesPanel.IsEnabled = loaded;
         // A single-channel image only has the composite curve.
-        CurveRedButton.IsEnabled = CurveGreenButton.IsEnabled = CurveBlueButton.IsEnabled = loaded && _image!.IsColour;
+        ImageCurves.ChannelsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
             RotateLeftButton.IsEnabled = RotateRightButton.IsEnabled =
             ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;

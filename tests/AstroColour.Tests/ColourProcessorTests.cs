@@ -1,4 +1,5 @@
 ﻿using AstroColour.Core.Colour;
+using AstroColour.Core.Curves;
 
 namespace AstroColour.Tests;
 
@@ -49,6 +50,67 @@ public class ColourProcessorTests
         float r2 = 0.2f, g2 = 0.3f, b2 = 0.9f; // blue: untouched
         Assert.False(set.Adjust(ref r2, ref g2, ref b2));
         Assert.Equal((0.2f, 0.3f, 0.9f), (r2, g2, b2));
+    }
+
+    [Fact]
+    public void Colour_curves_apply_only_to_selected_colours()
+    {
+        var adjustment = new ColourAdjustment { TargetHue = 0, Range = 15, Smoothness = 10 };
+        adjustment.Curves[CurveChannel.Rgb].Points[1] = new CurvePoint(1f, 0.5f); // halve every channel
+        Assert.True(adjustment.HasEdits);
+        Assert.False(adjustment.HasHslEdits);
+        var set = new AdjustmentSet([adjustment]);
+
+        float r = 0.8f, g = 0.2f, b = 0.2f; // red: selected
+        Assert.True(set.Adjust(ref r, ref g, ref b));
+        Assert.Equal(0.4f, r, 3);
+        Assert.Equal(0.1f, g, 3);
+        Assert.Equal(0.1f, b, 3);
+
+        float r2 = 0.2f, g2 = 0.3f, b2 = 0.9f; // blue: untouched
+        Assert.False(set.Adjust(ref r2, ref g2, ref b2));
+        Assert.Equal((0.2f, 0.3f, 0.9f), (r2, g2, b2));
+    }
+
+    [Fact]
+    public void Colour_curves_follow_hsl_changes_and_are_blended_by_weight()
+    {
+        var adjustment = new ColourAdjustment { TargetHue = 0, Range = 0, Smoothness = 60, NeutralProtection = 0, Saturation = -100 };
+        adjustment.Curves[CurveChannel.Rgb].Points[1] = new CurvePoint(1f, 0.5f);
+        var set = new AdjustmentSet([adjustment]);
+
+        // Fully selected: desaturated to grey (lightness 0.5), then halved.
+        float r = 0.8f, g = 0.2f, b = 0.2f;
+        set.Adjust(ref r, ref g, ref b);
+        Assert.Equal(0.25f, r, 3);
+        Assert.Equal(0.25f, b, 3);
+
+        // Partly selected (30° from the target): the curve moves it only part of the way.
+        float r2 = 0.8f, g2 = 0.5f, b2 = 0.2f;
+        set.Adjust(ref r2, ref g2, ref b2);
+        float weight = adjustment.Weight(30, 0.6f, 0.5f);
+        Assert.InRange(weight, 0.1f, 0.9f);
+        Assert.InRange(r2, 0.4f, 0.8f);
+    }
+
+    [Fact]
+    public void Clone_copies_curves()
+    {
+        var adjustment = new ColourAdjustment();
+        var copy = adjustment.Clone();
+        copy.Curves[CurveChannel.Red].Points[1] = new CurvePoint(1f, 0.5f);
+        Assert.True(adjustment.Curves.IsIdentity);
+        Assert.False(copy.Curves.IsIdentity);
+    }
+
+    [Fact]
+    public void Selection_histogram_counts_only_selected_colours()
+    {
+        float[] r = [0.9f, 0.1f], g = [0.1f, 0.1f], b = [0.1f, 0.9f]; // a red and a blue pixel
+        var histogram = CurveSet.Histogram(new RgbImage(2, 1, r, g, b), bins: 4,
+            selection: new ColourAdjustment { TargetHue = 0, Range = 15, Smoothness = 10 });
+        Assert.Equal([0f, 0f, 0f, 1f], histogram[(int)CurveChannel.Red]);
+        Assert.Equal([1f, 0f, 0f, 0f], histogram[(int)CurveChannel.Blue]);
     }
 
     [Fact]

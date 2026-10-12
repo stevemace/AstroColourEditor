@@ -53,7 +53,7 @@
             <Setter Property="MinHeight" Value="40" />
             <Setter Property="Padding" Value="12,0" />
         </Style>
-        <Style Selector="UniformGrid#CurveChannels > ToggleButton">
+        <Style Selector="UniformGrid#ColourEditModes > ToggleButton">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="Padding" Value="4,5" />
@@ -196,17 +196,31 @@
                                 </ListBox>
 
                                 <StackPanel x:Name="EditorPanel" Spacing="0" IsVisible="False">
-                                    <Grid Margin="0,4,0,4">
-                                        <TextBlock Text="Adjust" Classes="strong" VerticalAlignment="Center" />
-                                        <HyperlinkButton Content="Reset" HorizontalAlignment="Right" Padding="4,2" Click="ResetAdjustment_Click"
-                                                         ToolTip.Tip="Reset hue, saturation and lightness" />
-                                    </Grid>
-                                    <controls:LabeledSlider x:Name="HueShiftSlider" Label="Hue" Minimum="-90" Maximum="90" Unit="°" ShowSign="True"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="SaturationSlider" Label="Saturation" Minimum="-100" Maximum="100" ShowSign="True"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="LightnessSlider" Label="Lightness" Minimum="-100" Maximum="100" ShowSign="True"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
+                                    <TextBlock Text="Edit with" Classes="strong" Margin="0,4,0,6" />
+                                    <UniformGrid x:Name="ColourEditModes" Rows="1" ColumnSpacing="4" Margin="0,0,0,8">
+                                        <ToggleButton x:Name="HslModeButton" Content="HSL" IsChecked="True" Click="ColourEditMode_Click"
+                                                      ToolTip.Tip="Shift the hue, saturation and lightness of the selected colours" />
+                                        <ToggleButton x:Name="CurvesModeButton" Content="Curves" Click="ColourEditMode_Click"
+                                                      ToolTip.Tip="Shape the tones of the selected colours with curves" />
+                                    </UniformGrid>
+
+                                    <StackPanel x:Name="HslEditor">
+                                        <Grid Margin="0,4,0,4">
+                                            <TextBlock Text="Adjust" Classes="strong" VerticalAlignment="Center" />
+                                            <HyperlinkButton Content="Reset" HorizontalAlignment="Right" Padding="4,2" Click="ResetAdjustment_Click"
+                                                             ToolTip.Tip="Reset hue, saturation and lightness" />
+                                        </Grid>
+                                        <controls:LabeledSlider x:Name="HueShiftSlider" Label="Hue" Minimum="-90" Maximum="90" Unit="°" ShowSign="True"
+                                                                ValueChanged="EditorSlider_ValueChanged" />
+                                        <controls:LabeledSlider x:Name="SaturationSlider" Label="Saturation" Minimum="-100" Maximum="100" ShowSign="True"
+                                                                ValueChanged="EditorSlider_ValueChanged" />
+                                        <controls:LabeledSlider x:Name="LightnessSlider" Label="Lightness" Minimum="-100" Maximum="100" ShowSign="True"
+                                                                ValueChanged="EditorSlider_ValueChanged" />
+                                    </StackPanel>
+
+                                    <controls:CurvesView x:Name="ColourCurves" IsVisible="False" Margin="0,4,0,0"
+                                                         CurvesChanged="ColourCurves_CurvesChanged"
+                                                         Hint="The histogram shows only the selected colours. Curves are blended in by how strongly each pixel is selected, after any HSL changes." />
 
                                     <TextBlock Text="Selected range" Classes="strong" Margin="0,12,0,4" />
                                     <ToggleSwitch x:Name="ShowMaskToggle" Content="View selected colour range" OffContent="Off" OnContent="On"
@@ -232,29 +246,8 @@
 
                     <TabItem x:Name="CurvesTab" Header="Curves">
                         <ScrollViewer x:Name="CurvesPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
-                            <StackPanel Margin="12,8,16,16" Spacing="12">
-                                <UniformGrid x:Name="CurveChannels" Rows="1" ColumnSpacing="4">
-                                    <ToggleButton x:Name="CurveRgbButton" Content="RGB" IsChecked="True" Click="CurveChannel_Click"
-                                                  ToolTip.Tip="Curve applied to all channels" />
-                                    <ToggleButton x:Name="CurveRedButton" Content="Red" Click="CurveChannel_Click" />
-                                    <ToggleButton x:Name="CurveGreenButton" Content="Green" Click="CurveChannel_Click" />
-                                    <ToggleButton x:Name="CurveBlueButton" Content="Blue" Click="CurveChannel_Click" />
-                                </UniformGrid>
-
-                                <controls:CurveEditor x:Name="CurveGraph" CurveChanged="CurveGraph_CurveChanged" />
-
-                                <Grid>
-                                    <TextBlock x:Name="CurveChannelText" Classes="strong" VerticalAlignment="Center" />
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
-                                        <HyperlinkButton Content="Reset" Padding="4,2" Click="ResetCurve_Click"
-                                                         ToolTip.Tip="Reset this channel's curve" />
-                                        <HyperlinkButton Content="Reset all" Padding="4,2" Click="ResetAllCurves_Click"
-                                                         ToolTip.Tip="Reset the curves of every channel" />
-                                    </StackPanel>
-                                </Grid>
-                                <TextBlock TextWrapping="Wrap" Classes="caption secondary"
-                                           Text="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points. Curves are applied after the colour editor." />
-                            </StackPanel>
+                            <controls:CurvesView x:Name="ImageCurves" Margin="12,8,16,16" CurvesChanged="ImageCurves_CurvesChanged"
+                                                 Hint="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points. Curves are applied after the colour editor." />
                         </ScrollViewer>
                     </TabItem>
                 </TabControl>

@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:AstroColour.Desktop.Controls"
+             x:Class="AstroColour.Desktop.Controls.CurvesView">
+    <UserControl.Styles>
+        <Style Selector="UniformGrid#Channels > ToggleButton">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="4,5" />
+        </Style>
+    </UserControl.Styles>
+    <StackPanel Spacing="12">
+        <UniformGrid x:Name="Channels" Rows="1" ColumnSpacing="4">
+            <ToggleButton x:Name="RgbButton" Content="RGB" IsChecked="True" Click="Channel_Click"
+                          ToolTip.Tip="Curve applied to all channels" />
+            <ToggleButton x:Name="RedButton" Content="Red" Click="Channel_Click" />
+            <ToggleButton x:Name="GreenButton" Content="Green" Click="Channel_Click" />
+            <ToggleButton x:Name="BlueButton" Content="Blue" Click="Channel_Click" />
+        </UniformGrid>
+
+        <controls:CurveEditor x:Name="Graph" CurveChanged="Graph_CurveChanged" />
+
+        <Grid>
+            <TextBlock x:Name="ChannelText" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                <HyperlinkButton Content="Reset" Padding="4,2" Click="Reset_Click"
+                                 ToolTip.Tip="Reset this channel's curve" />
+                <HyperlinkButton Content="Reset all" Padding="4,2" Click="ResetAll_Click"
+                                 ToolTip.Tip="Reset the curves of every channel" />
+            </StackPanel>
+        </Grid>
+        <TextBlock x:Name="HintText" TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
+    </StackPanel>
+</UserControl>

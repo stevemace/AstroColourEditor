@@ -15,6 +15,9 @@ public sealed class AdjustmentItem : INotifyPropertyChanged
 
     public ColourAdjustment Model { get; }
 
+    /// <summary>Whether the colour is being edited with curves rather than the HSL sliders.</summary>
+    public bool EditWithCurves { get; set; }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>Raised when the user toggles the entry on or off.</summary>
@@ -23,9 +26,15 @@ public sealed class AdjustmentItem : INotifyPropertyChanged
     public string Name => $"{ColourMath.HueName(Model.TargetHue)}  {Math.Round(Model.TargetHue)}°";
 
     public string Summary =>
-        Model.HasEdits
-            ? $"H {Signed(Model.HueShift)}°   S {Signed(Model.Saturation)}   L {Signed(Model.Lightness)}"
-            : "No adjustments";
+        (Model.HasHslEdits, Model.Curves.IsIdentity) switch
+        {
+            (true, true) => Hsl,
+            (true, false) => Hsl + "   Curves",
+            (false, false) => "Curves",
+            _ => "No adjustments",
+        };
+
+    private string Hsl => $"H {Signed(Model.HueShift)}°   S {Signed(Model.Saturation)}   L {Signed(Model.Lightness)}";
 
     /// <summary>The picked colour, re-hued to the current target hue.</summary>
     public IBrush Swatch

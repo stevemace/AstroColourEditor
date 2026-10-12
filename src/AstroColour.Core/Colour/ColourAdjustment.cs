@@ -1,10 +1,11 @@
 using System.Runtime.CompilerServices;
+using AstroColour.Core.Curves;
 
 namespace AstroColour.Core.Colour;
 
 /// <summary>
-/// One colour range and the HSL changes applied to it, in the style of Capture One's
-/// Advanced colour editor. Pixels whose hue lies within <see cref="Range"/> degrees of
+/// One colour range and the changes applied to it, in the style of Capture One's
+/// Advanced colour editor: HSL shifts, tone curves, or both. Pixels whose hue lies within <see cref="Range"/> degrees of
 /// <see cref="TargetHue"/> receive the full adjustment, which then fades out over a
 /// further <see cref="Smoothness"/> degrees. The selection can also be limited to pixels
 /// whose HSL lightness lies between <see cref="LightnessMin"/> and <see cref="LightnessMax"/>.
@@ -44,6 +45,9 @@ public sealed class ColourAdjustment
     /// <summary>Lightness change, −100 to +100.</summary>
     public float Lightness { get; set; }
 
+    /// <summary>Tone curves applied to the selected colours, after the HSL changes.</summary>
+    public CurveSet Curves { get; private set; } = new();
+
     public bool Enabled { get; set; } = true;
 
     /// <summary>The averaged colour that was picked from the image.</summary>
@@ -51,11 +55,18 @@ public sealed class ColourAdjustment
     public float SampleG { get; set; }
     public float SampleB { get; set; }
 
-    public bool HasEdits => HueShift != 0 || Saturation != 0 || Lightness != 0;
+    public bool HasHslEdits => HueShift != 0 || Saturation != 0 || Lightness != 0;
 
-    public ColourAdjustment Clone() => (ColourAdjustment)MemberwiseClone();
+    public bool HasEdits => HasHslEdits || !Curves.IsIdentity;
 
-    public void ResetEdits()
+    public ColourAdjustment Clone()
+    {
+        var copy = (ColourAdjustment)MemberwiseClone();
+        copy.Curves = Curves.Clone();
+        return copy;
+    }
+
+    public void ResetHsl()
     {
         HueShift = 0;
         Saturation = 0;

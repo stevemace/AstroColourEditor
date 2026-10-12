@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using AstroColour.Core.Curves;
 
 namespace AstroColour.Core.Colour;
 
@@ -12,9 +13,10 @@ public sealed class AdjustmentSet
 
     private readonly Entry[] _entries;
     private readonly bool[] _anySelected; // bin i: does any adjustment select hues in [i, i+1]?
+    private readonly bool _anyCurves;
 
     private readonly record struct Entry(float[] HueWeights, float ChromaEdge, float LightLow, float LightHigh, float LightSoftness,
-        float HueShift, float Saturation, float Lightness);
+        float HueShift, float Saturation, float Lightness, CurveLookup? Curves);
 
     /// <param name="adjustments">Adjustments to include; disabled or no-op ones are skipped unless <paramref name="includeAll"/>.</param>
     /// <param name="includeAll">Include every adjustment, e.g. to evaluate a selection mask.</param>
@@ -24,8 +26,9 @@ public sealed class AdjustmentSet
             .Where(a => includeAll || (a.Enabled && a.HasEdits))
             .Select(a => new Entry(HueTable(a), a.NeutralProtection / 100f,
                 a.LightnessMin / 100f, a.LightnessMax / 100f, a.LightnessSmoothness / 100f,
-                a.HueShift, a.Saturation / 100f, a.Lightness / 100f))
+                a.HueShift, a.Saturation / 100f, a.Lightness / 100f, Lookup(a.Curves)))
             .ToArray();
+        _anyCurves = _entries.Any(e => e.Curves is not null);
 
         _anySelected = new bool[Bins];
         foreach (var e in _entries)
@@ -34,6 +37,12 @@ public sealed class AdjustmentSet
     }
 
     public bool IsEmpty => _entries.Length == 0;
+
+    private static CurveLookup? Lookup(CurveSet curves)
+    {
+        var lookup = new CurveLookup(curves);
+        return lookup.IsEmpty ? null : lookup;
+    }
 
     private static float[] HueTable(ColourAdjustment a)
     {
@@ -67,8 +76,9 @@ public sealed class AdjustmentSet
     }
 
     /// <summary>
-    /// Applies the adjustments to one pixel. Each adjustment's weight is measured against the
-    /// pixel's original colour, so overlapping ranges combine rather than chain.
+    /// Applies the adjustments to one pixel: first the HSL changes, then each adjustment's curves,
+    /// blended in by its selection weight. Each adjustment's weight is measured against the pixel's
+    /// original colour, so overlapping ranges combine rather than chain.
     /// Returns false (leaving the pixel untouched) if no adjustment selects it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -106,13 +116,35 @@ public sealed class AdjustmentSet
         }
         if (!selected) return false;
 
-        float s = l > 0.5f ? chroma / (2f - max - min) : chroma / (max + min);
-        ds = Math.Clamp(ds, -1f, 1f);
-        dl = Math.Clamp(dl, -1f, 1f);
+        if (dh != 0f || ds != 0f || dl != 0f)
+        {
+            float s = l > 0.5f ? chroma / (2f - max - min) : chroma / (max + min);
+            ds = Math.Clamp(ds, -1f, 1f);
+            dl = Math.Clamp(dl, -1f, 1f);
 
-        float newS = Math.Clamp(s * (1f + ds), 0f, 1f);
-        float newL = dl >= 0f ? l + (1f - l) * dl * 0.5f : l * (1f + dl * 0.5f);
-        ColourMath.HslToRgb(h + dh, newS, Math.Clamp(newL, 0f, 1f), out r, out g, out b);
+            float newS = Math.Clamp(s * (1f + ds), 0f, 1f);
+            float newL = dl >= 0f ? l + (1f - l) * dl * 0.5f : l * (1f + dl * 0.5f);
+            ColourMath.HslToRgb(h + dh, newS, Math.Clamp(newL, 0f, 1f), out r, out g, out b);
+        }
+
+        if (_anyCurves)
+        {
+            float dr = 0f, dg = 0f, db = 0f;
+            foreach (ref readonly var e in _entries.AsSpan())
+            {
+                if (e.Curves is null) continue;
+                float w = Weight(e, h, chroma, l);
+                if (w <= 0f) continue;
+                float tr = r, tg = g, tb = b;
+                e.Curves.Apply(ref tr, ref tg, ref tb);
+                dr += w * (tr - r);
+                dg += w * (tg - g);
+                db += w * (tb - b);
+            }
+            r += dr;
+            g += dg;
+            b += db;
+        }
         return true;
     }
 }

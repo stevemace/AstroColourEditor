@@ -37,24 +37,36 @@ public sealed class CurveSet
     /// Sparse histograms of the image for drawing behind the curves, indexed by <see cref="CurveChannel"/>
     /// (luminance for <see cref="CurveChannel.Rgb"/>). Bin heights are square-root scaled to [0,1].
     /// </summary>
-    public static float[][] Histogram(RgbImage image, int bins = 256)
+    /// <param name="selection">If given, each pixel counts by how strongly this colour range selects it.</param>
+    public static float[][] Histogram(RgbImage image, int bins = 256, ColourAdjustment? selection = null)
     {
-        var counts = new long[4][];
-        for (int c = 0; c < 4; c++) counts[c] = new long[bins];
-        int step = Math.Max(1, image.PixelCount / 1_000_000);
+        var counts = new double[4][];
+        for (int c = 0; c < 4; c++) counts[c] = new double[bins];
+        var weights = selection is null ? null : new AdjustmentSet([selection], includeAll: true);
+        int step = Math.Max(1, image.PixelCount / (weights is null ? 1_000_000 : 250_000));
         for (int i = 0; i < image.PixelCount; i += step)
         {
             float r = image.R[i], g = image.G[i], b = image.B[i];
-            counts[0][Bin(0.2126f * r + 0.7152f * g + 0.0722f * b, bins)]++;
-            counts[1][Bin(r, bins)]++;
-            counts[2][Bin(g, bins)]++;
-            counts[3][Bin(b, bins)]++;
+            float w = 1f;
+            if (weights is not null)
+            {
+                ColourMath.RgbToHsl(Math.Clamp(r, 0f, 1f), Math.Clamp(g, 0f, 1f), Math.Clamp(b, 0f, 1f),
+                    out float h, out _, out float l, out float chroma);
+                w = chroma <= 1e-7f ? 0f : weights.Weight(h, chroma, l);
+                if (w <= 0f) continue;
+            }
+            counts[0][Bin(0.2126f * r + 0.7152f * g + 0.0722f * b, bins)] += w;
+            counts[1][Bin(r, bins)] += w;
+            counts[2][Bin(g, bins)] += w;
+            counts[3][Bin(b, bins)] += w;
         }
 
         return counts.Select(channel =>
         {
             // Scale to the tallest interior bin, so clipped blacks or whites don't flatten the rest.
-            double max = Math.Max(1, channel.Skip(1).Take(bins - 2).DefaultIfEmpty(0).Max());
+            double max = channel.Skip(1).Take(bins - 2).DefaultIfEmpty(0).Max();
+            if (max <= 0) max = Math.Max(channel[0], channel[^1]);
+            if (max <= 0) max = 1;
             return channel.Select(n => (float)Math.Min(1, Math.Sqrt(n / max))).ToArray();
         }).ToArray();
     }
