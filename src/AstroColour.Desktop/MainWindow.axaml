@@ -29,6 +29,13 @@
         <Style Selector="controls|LineIcon">
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
+        <!-- macOS system font sits low in its line box; nudge labels beside icons to centre them -->
+        <Style Selector="TextBlock.iconLabel">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin">
+                <OnPlatform x:TypeArguments="Thickness" Default="0" macOS="0,3,0,0" />
+            </Setter>
+        </Style>
         <Style Selector="Button.tool, ToggleButton.tool">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -67,19 +74,19 @@
             <Button x:Name="OpenButton" Classes="tool" Click="Open_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M1.5,3.5 H6 L7.5,5.5 H14.5 V12.5 H1.5 Z" />
-                    <TextBlock Text="Open" />
+                    <TextBlock Text="Open" Classes="iconLabel" />
                 </StackPanel>
             </Button>
             <Button x:Name="SaveButton" Classes="tool" Click="Save_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M2.5,2.5 H11 L13.5,5 V13.5 H2.5 Z M5,2.5 V5.5 H10 V2.5 M4.5,13.5 V9 H11.5 V13.5" />
-                    <TextBlock Text="Save" />
+                    <TextBlock Text="Save" Classes="iconLabel" />
                 </StackPanel>
             </Button>
             <Button x:Name="SaveAsButton" Classes="tool" Click="SaveAs_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M8,1.5 V9.5 M4.5,6 L8,9.5 L11.5,6 M2.5,10 V13.5 H13.5 V10" />
-                    <TextBlock Text="Save as" />
+                    <TextBlock Text="Save as" Classes="iconLabel" />
                 </StackPanel>
             </Button>
             <Rectangle Classes="separator" />
@@ -93,20 +100,20 @@
             <Button x:Name="FitButton" Classes="tool" Click="Fit_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M1.5,5.5 V1.5 H5.5 M10.5,1.5 H14.5 V5.5 M14.5,10.5 V14.5 H10.5 M5.5,14.5 H1.5 V10.5" />
-                    <TextBlock Text="Fit" />
+                    <TextBlock Text="Fit" Classes="iconLabel" />
                 </StackPanel>
             </Button>
             <Button x:Name="ActualSizeButton" Classes="tool" Click="ActualSize_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M1.5,6.5 A5,5 0 1 1 11.5,6.5 A5,5 0 1 1 1.5,6.5 Z M10.2,10.2 L14.5,14.5" />
-                    <TextBlock Text="100%" />
+                    <TextBlock Text="100%" Classes="iconLabel" />
                 </StackPanel>
             </Button>
             <Rectangle Classes="separator" />
             <ToggleButton x:Name="CompareButton" Classes="tool" Click="Compare_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M1.5,2.5 H14.5 V13.5 H1.5 Z M8,1 V15" />
-                    <TextBlock Text="Before" />
+                    <TextBlock Text="Before" Classes="iconLabel" />
                 </StackPanel>
             </ToggleButton>
         </StackPanel>
@@ -164,7 +171,7 @@
                                               Click="Picker_Click">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <controls:LineIcon Data="M8,1 V4.5 M8,11.5 V15 M1,8 H4.5 M11.5,8 H15 M3.5,8 A4.5,4.5 0 1 1 12.5,8 A4.5,4.5 0 1 1 3.5,8 Z" />
-                                        <TextBlock Text="Pick colour from image" />
+                                        <TextBlock Text="Pick colour from image" Classes="iconLabel" />
                                     </StackPanel>
                                 </ToggleButton>
                                 <TextBlock x:Name="PickerHint" TextWrapping="Wrap" Classes="caption secondary"
@@ -258,7 +265,7 @@
                                         Click="LoadStars_Click" ToolTip.Tip="Open a stars-only image the same size as this one">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <controls:LineIcon Data="M8,1.5 L9.8,6.2 L14.5,8 L9.8,9.8 L8,14.5 L6.2,9.8 L1.5,8 L6.2,6.2 Z" />
-                                        <TextBlock x:Name="LoadStarsText" Text="Add stars image…" />
+                                        <TextBlock x:Name="LoadStarsText" Text="Add stars image…" Classes="iconLabel" />
                                     </StackPanel>
                                 </Button>
                                 <TextBlock TextWrapping="Wrap" Classes="caption secondary"
