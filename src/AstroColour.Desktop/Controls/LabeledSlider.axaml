@@ -11,7 +11,7 @@
         <Grid Margin="0,-10,0,0">
             <Rectangle x:Name="Gradient" Height="5" RadiusX="2.5" RadiusY="2.5" Margin="10,0,10,5" VerticalAlignment="Bottom"
                        IsVisible="False" IsHitTestVisible="False" />
-            <Slider x:Name="Slider" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
+            <Slider x:Name="Slider" ToolTip.Tip="Double-click to reset" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="Slider_ValueChanged" />
         </Grid>
     </StackPanel>
 </UserControl>

@@ -251,10 +251,18 @@
                         </ScrollViewer>
                     </TabItem>
 
-                    <TabItem x:Name="CurvesTab" Header="Curves">
-                        <ScrollViewer x:Name="CurvesPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
-                            <controls:CurvesView x:Name="ImageCurves" Margin="12,8,16,16" CurvesChanged="ImageCurves_CurvesChanged"
-                                                 Hint="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points. Curves are applied after the colour editor." />
+                    <TabItem x:Name="GlobalTab" Header="Global">
+                        <ScrollViewer x:Name="GlobalPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
+                            <StackPanel Margin="12,8,16,16" Spacing="0">
+                                <TextBlock Text="Curves" Classes="strong" Margin="0,0,0,8" />
+                                <controls:CurvesView x:Name="ImageCurves" CurvesChanged="ImageCurves_CurvesChanged"
+                                                     Hint="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points." />
+
+                                <controls:LabeledSlider x:Name="GlobalSaturationSlider" Label="Saturation" Margin="0,16,0,0" Minimum="-100" Maximum="100" ShowSign="True"
+                                                        ValueChanged="GlobalSaturationSlider_ValueChanged" />
+                                <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
+                                           Text="Saturation applies to the whole image, after the colour editor and the curves." />
+                            </StackPanel>
                         </ScrollViewer>
                     </TabItem>
 
@@ -269,7 +277,7 @@
                                     </StackPanel>
                                 </Button>
                                 <TextBlock TextWrapping="Wrap" Classes="caption secondary"
-                                           Text="Add the stars back over this (starless) image with the pixel math ~((~starless) * (~(stars * x))). The stars image must be the same size as this image, and goes on after the colour editor and curves." />
+                                           Text="Add the stars back over this (starless) image with the pixel math ~((~starless) * (~(stars * x))). The stars image must be the same size as this image, and goes on after the colour editor and the Global tab's edits." />
 
                                 <StackPanel x:Name="StarsEditor" Spacing="8" IsVisible="False">
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">

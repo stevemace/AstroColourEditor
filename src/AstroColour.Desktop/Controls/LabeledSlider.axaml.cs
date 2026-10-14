@@ -14,6 +14,8 @@ public partial class LabeledSlider : UserControl
     {
         InitializeComponent();
         UpdateValueText();
+        // The slider's thumb and track handle presses themselves, so watch for the double-click on the way down.
+        Slider.AddHandler(PointerPressedEvent, Slider_PointerPressed, RoutingStrategies.Tunnel);
     }
 
     public event EventHandler? ValueChanged;
@@ -86,6 +88,13 @@ public partial class LabeledSlider : UserControl
     }
 
     private void Label_DoubleTapped(object? sender, TappedEventArgs e) => Value = DefaultValue;
+
+    private void Slider_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.ClickCount != 2 || !e.GetCurrentPoint(Slider).Properties.IsLeftButtonPressed) return;
+        Value = DefaultValue;
+        e.Handled = true; // don't start a drag from the reset value
+    }
 
     private void UpdateValueText()
     {

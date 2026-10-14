@@ -75,6 +75,7 @@ public partial class MainWindow : Window
         PositionChanged += (_, _) => TrackRestoredBounds();
         AdjustmentList.ItemsSource = _adjustments;
         TargetHueSlider.GradientBrush = HueRamp(0, 360);
+        GlobalSaturationSlider.GradientBrush = Ramp(Hsl(0, 0, 0.5f), Hsl(0, 1, 0.5f));
         ImageCurves.Curves = _curves;
 
         SetShortcutTip(OpenButton, "Open an XISF, FITS or TIFF image", "O");
@@ -188,10 +189,11 @@ public partial class MainWindow : Window
             _curves.Reset();
             ImageCurves.Histogram = histogram;
             ImageCurves.ShowChannel(CurveChannel.Rgb);
+            SetGlobalSaturation(0);
             SetRotation(Rotation.None);
             ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
-            if (!image.IsColour) EditorTabs.SelectedItem = CurvesTab;
+            if (!image.IsColour) EditorTabs.SelectedItem = GlobalTab;
 
             _full = new PreviewLayer(rgb);
             _proxy = proxy is null ? null : new PreviewLayer(proxy);
@@ -263,9 +265,10 @@ public partial class MainWindow : Window
             var image = _image;
             var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
             var curves = _curves.Clone();
+            var saturation = GlobalSaturation;
             var stars = _stars is null ? null : new StarLayer(_stars, StarBrightness);
             var rotation = _rotation;
-            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves, stars), rotation));
+            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves, stars, saturation), rotation));
             _path = target;
             _isDirty = false;
             UpdateChrome();
@@ -408,6 +411,7 @@ public partial class MainWindow : Window
 
                 var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
                 var curves = _curves.Clone();
+                var saturation = GlobalSaturation;
                 var mask = Selected?.Model.Clone();
                 var stars = layer.Stars is null ? null : new StarLayer(layer.Stars, StarBrightness);
                 var mode = CompareButton.IsChecked == true ? PreviewMode.Original
@@ -418,7 +422,7 @@ public partial class MainWindow : Window
                 if (layer == full) _fullRenderCancellation = cancellation;
                 try
                 {
-                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars));
+                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars, saturation));
                 }
                 catch (OperationCanceledException)
                 {
@@ -672,12 +676,28 @@ public partial class MainWindow : Window
         return Color.FromArgb(255, (byte)(r * 255 + 0.5f), (byte)(g * 255 + 0.5f), (byte)(b * 255 + 0.5f));
     }
 
-    // ---------------------------------------------------------------- curves
+    // ---------------------------------------------------------------- global
 
     private void ImageCurves_CurvesChanged(object? sender, bool interactive)
     {
         MarkDirty();
         RequestRender(interactive);
+    }
+
+    private float GlobalSaturation => (float)GlobalSaturationSlider.Value;
+
+    private void SetGlobalSaturation(double value)
+    {
+        _suppressEditorEvents = true;
+        GlobalSaturationSlider.Value = value;
+        _suppressEditorEvents = false;
+    }
+
+    private void GlobalSaturationSlider_ValueChanged(object? sender, EventArgs e)
+    {
+        if (_suppressEditorEvents) return;
+        MarkDirty();
+        RequestRender(interactive: true);
     }
 
     // ----------------------------------------------------------------- stars
@@ -1059,10 +1079,10 @@ public partial class MainWindow : Window
         bool loaded = _image is not null;
         EmptyState.IsVisible = !loaded;
         ColourPanel.IsEnabled = loaded && _image!.IsColour;
-        CurvesPanel.IsEnabled = loaded;
+        GlobalPanel.IsEnabled = loaded;
         StarsPanel.IsEnabled = loaded;
-        // A single-channel image only has the composite curve.
-        ImageCurves.ChannelsEnabled = loaded && _image!.IsColour;
+        // A single-channel image only has the composite curve, and no saturation to change.
+        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
             RotateLeftButton.IsEnabled = RotateRightButton.IsEnabled =
             ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;

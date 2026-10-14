@@ -7,7 +7,7 @@ namespace AstroColour.Core.Colour;
 
 public enum PreviewMode
 {
-    /// <summary>The image with all adjustments, curves and stars applied.</summary>
+    /// <summary>The image with all adjustments, curves, global saturation and stars applied.</summary>
     Adjusted,
     /// <summary>The unedited image, for before/after comparison.</summary>
     Original,
@@ -19,10 +19,13 @@ public static class ColourProcessor
 {
     /// <summary>
     /// Renders the image into an 8-bit BGRA buffer of Width×Height×4 bytes. Colour adjustments are
-    /// applied first, then <paramref name="curves"/>, then <paramref name="stars"/> (which must match the image's size).
+    /// applied first, then <paramref name="curves"/>, then <paramref name="saturation"/>, then <paramref name="stars"/>
+    /// (which must match the image's size).
     /// </summary>
+    /// <param name="saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
     public static void RenderPreview(RgbImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves,
-        PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default, StarLayer? stars = null)
+        PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default, StarLayer? stars = null,
+        float saturation = 0f)
     {
         var set = new AdjustmentSet(adjustments);
         var maskSet = mode == PreviewMode.Mask && mask is not null ? new AdjustmentSet([mask], includeAll: true) : null;
@@ -30,6 +33,7 @@ public static class ColourProcessor
         if (lookup is { IsEmpty: true }) lookup = null;
         if (mode == PreviewMode.Original) set = new AdjustmentSet([]);
         if (mode != PreviewMode.Adjusted || stars is { IsEmpty: true }) stars = null;
+        if (mode != PreviewMode.Adjusted) saturation = 0f;
         if (stars is not null && !stars.Fits(image.Width, image.Height))
             throw new ArgumentException("The stars image is not the same size as the image.", nameof(stars));
 
@@ -60,6 +64,7 @@ public static class ColourProcessor
                 {
                     set.Adjust(ref r, ref g, ref b);
                     lookup?.Apply(ref r, ref g, ref b);
+                    if (saturation != 0f) Saturate(ref r, ref g, ref b, saturation);
                     stars?.Apply(i, ref r, ref g, ref b);
                 }
 
@@ -69,11 +74,12 @@ public static class ColourProcessor
     }
 
     /// <summary>
-    /// Applies the adjustments, then the curves, then the stars at full precision, returning new planes for saving.
-    /// A single-channel image takes the stars' luminance.
+    /// Applies the adjustments, then the curves, then the global saturation, then the stars at full precision,
+    /// returning new planes for saving. A single-channel image takes only the curves and the stars' luminance.
     /// </summary>
+    /// <param name="saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
     public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves = null,
-        StarLayer? stars = null)
+        StarLayer? stars = null, float saturation = 0f)
     {
         var planes = image.Planes.Select(p => (float[])p.Clone()).ToArray();
         var lookup = curves is null ? null : new CurveLookup(curves, monochrome: !image.IsColour);
@@ -100,7 +106,7 @@ public static class ColourProcessor
         }
 
         var set = new AdjustmentSet(adjustments);
-        if (set.IsEmpty && lookup is null && stars is null) return planes;
+        if (set.IsEmpty && lookup is null && saturation == 0f && stars is null) return planes;
 
         float[] rp = planes[0], gp = planes[1], bp = planes[2];
         Parallel.For(0, image.Height, [MethodImpl(MethodImplOptions.AggressiveOptimization)] (int y) =>
@@ -113,6 +119,11 @@ public static class ColourProcessor
                 if (lookup is not null)
                 {
                     lookup.Apply(ref r, ref g, ref b);
+                    changed = true;
+                }
+                if (saturation != 0f)
+                {
+                    Saturate(ref r, ref g, ref b, saturation);
                     changed = true;
                 }
                 if (stars is not null)
@@ -159,6 +170,15 @@ public static class ColourProcessor
             samples.Add((image.R[i] + image.G[i] + image.B[i]) / 3f);
         samples.Sort();
         return samples[samples.Count / 2];
+    }
+
+    /// <summary>Scales a pixel's HSL saturation by 1 + <paramref name="amount"/>/100, clamping it to [0,1].</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Saturate(ref float r, ref float g, ref float b, float amount)
+    {
+        ColourMath.RgbToHsl(Math.Clamp(r, 0f, 1f), Math.Clamp(g, 0f, 1f), Math.Clamp(b, 0f, 1f),
+            out float h, out float s, out float l, out _);
+        ColourMath.HslToRgb(h, Math.Clamp(s * (1f + amount / 100f), 0f, 1f), l, out r, out g, out b);
     }
 
     private static byte ToByte(float v) => (byte)(Math.Clamp(v, 0f, 1f) * 255f + 0.5f);

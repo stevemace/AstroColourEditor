@@ -17,15 +17,17 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    - **View selected colour range** greys out everything not being edited.
    - **Centre hue / Range / Smoothness** set the hue band and how gently it fades.
    - **Protect neutrals** leaves near-grey pixels (background, white stars) alone.
-5. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider label to reset it.
-6. On the **Curves** tab, shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
-   channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
-   off the graph to remove it. Moving the end points sets the black and white points. Curves are applied after
-   the colour editor, and also work on monochrome images (RGB curve only).
+5. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider (or its label) to reset it.
+6. The **Global** tab edits the whole image, after the colour editor:
+   - **Curves** shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
+     channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
+     off the graph to remove it. Moving the end points sets the black and white points.
+   - **Saturation** strengthens or mutes every colour in the image, after the curves.
+   Curves also work on monochrome images (RGB curve only).
 7. On the **Stars** tab, **Add stars image…** loads a stars-only image (e.g. from StarXTerminator) the same size as
    the open (starless) image and adds it back with the pixel math `~((~starless) * (~(stars * x)))`. The
    **Star brightness (x)** slider (0–1) sets how bright the stars are. Stars go on after the colour editor and
-   curves, are hidden by **Before**, and are blended into the saved image. A mono image takes the stars' luminance.
+   the Global tab's edits, are hidden by **Before**, and are blended into the saved image. A mono image takes the stars' luminance.
 8. **Rotate left / right** (Ctrl+[ / Ctrl+]) turns the image 90° at a time; the rotation is applied when you save.
    A rotated image's astrometric solution (WCS keywords and PixInsight astrometry properties) no longer
    matches its pixels, so it is removed on saving — plate-solve the saved image again if you need one.
