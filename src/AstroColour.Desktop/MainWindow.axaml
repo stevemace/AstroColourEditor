@@ -164,6 +164,54 @@
             <Border Grid.Column="1" Background="{DynamicResource PanelBrush}"
                     BorderBrush="{DynamicResource PanelStrokeBrush}" BorderThickness="1,0,0,0">
                 <TabControl x:Name="EditorTabs" Padding="0" Margin="4,4,0,0" SelectionChanged="EditorTabs_SelectionChanged">
+                    <TabItem x:Name="GlobalTab" Header="Global">
+                        <ScrollViewer x:Name="GlobalPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
+                            <StackPanel Margin="12,8,16,16" Spacing="0">
+                                <StackPanel x:Name="NarrowbandSection" Spacing="0">
+                                    <TextBlock Text="Narrowband normalisation" Classes="strong" Margin="0,0,0,6" />
+                                    <UniformGrid Classes="segments" Rows="1" ColumnSpacing="4" Margin="0,0,0,8">
+                                        <ToggleButton x:Name="NarrowbandOffButton" Content="Off" IsChecked="True" Click="NarrowbandPalette_Click"
+                                                      ToolTip.Tip="Leave the channels as they are" />
+                                        <ToggleButton x:Name="NarrowbandShoButton" Content="SHO" Click="NarrowbandPalette_Click"
+                                                      ToolTip.Tip="SII in red, Hα in green, OIII in blue" />
+                                        <ToggleButton x:Name="NarrowbandHooButton" Content="HOO" Click="NarrowbandPalette_Click"
+                                                      ToolTip.Tip="Hα in red, OIII in green and blue" />
+                                    </UniformGrid>
+                                    <StackPanel x:Name="NarrowbandEditor" Spacing="8" IsVisible="False">
+                                        <controls:LabeledSlider x:Name="SiiBoostSlider" Label="SII boost" Minimum="0.5" Maximum="2"
+                                                                Step="0.01" Decimals="2" DefaultValue="1" Value="1"
+                                                                ValueChanged="NarrowbandSlider_ValueChanged" />
+                                        <controls:LabeledSlider x:Name="OiiiBoostSlider" Label="OIII boost" Minimum="0.5" Maximum="2"
+                                                                Step="0.01" Decimals="2" DefaultValue="1" Value="1"
+                                                                ValueChanged="NarrowbandSlider_ValueChanged" />
+                                        <controls:LabeledSlider x:Name="GreenReductionSlider" Label="Green reduction (SCNR)" Minimum="0" Maximum="100"
+                                                                Step="1" Unit="%" ValueChanged="NarrowbandSlider_ValueChanged" />
+                                        <TextBlock Text="Lightness" Margin="0,4,0,0" />
+                                        <UniformGrid Classes="segments" Rows="1" ColumnSpacing="4">
+                                            <ToggleButton x:Name="LightnessNormalisedButton" Content="Normalised" IsChecked="True" Click="NarrowbandLightness_Click"
+                                                          ToolTip.Tip="Keep the lightness of the normalised colours" />
+                                            <ToggleButton x:Name="LightnessOriginalButton" Content="Original" Click="NarrowbandLightness_Click"
+                                                          ToolTip.Tip="Keep each pixel's lightness from before normalising" />
+                                            <ToggleButton x:Name="LightnessHAlphaButton" Content="Hα" Click="NarrowbandLightness_Click"
+                                                          ToolTip.Tip="Take each pixel's lightness from the Hα channel" />
+                                        </UniformGrid>
+                                    </StackPanel>
+                                    <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
+                                               Text="Matches the SII and OIII channels to the Hα channel's background and spread, after Bill Blanshan's narrowband normalisation, to remove the strong Hα cast. It applies first, before the colour editor. Works best on a starless image after background neutralisation and an unlinked stretch." />
+                                </StackPanel>
+
+                                <TextBlock Text="Curves" Classes="strong" Margin="0,16,0,8" />
+                                <controls:CurvesView x:Name="ImageCurves" CurvesChanged="ImageCurves_CurvesChanged"
+                                                     Hint="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points." />
+
+                                <controls:LabeledSlider x:Name="GlobalSaturationSlider" Label="Saturation" Margin="0,16,0,0" Minimum="-100" Maximum="100" ShowSign="True"
+                                                        ValueChanged="GlobalSaturationSlider_ValueChanged" />
+                                <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
+                                           Text="Saturation applies to the whole image, after the colour editor and the curves." />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
                     <TabItem x:Name="ColourTab" Header="Colour">
                         <ScrollViewer x:Name="ColourPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
                             <StackPanel Margin="12,8,16,16" Spacing="12">
@@ -247,54 +295,6 @@
                                     <controls:LabeledSlider x:Name="ProtectSlider" Label="Protect neutrals" Minimum="0" Maximum="90" DefaultValue="5" Unit="%"
                                                             ValueChanged="EditorSlider_ValueChanged" />
                                 </StackPanel>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </TabItem>
-
-                    <TabItem x:Name="GlobalTab" Header="Global">
-                        <ScrollViewer x:Name="GlobalPanel" VerticalScrollBarVisibility="Auto" IsEnabled="False">
-                            <StackPanel Margin="12,8,16,16" Spacing="0">
-                                <StackPanel x:Name="NarrowbandSection" Spacing="0">
-                                    <TextBlock Text="Narrowband normalisation" Classes="strong" Margin="0,0,0,6" />
-                                    <UniformGrid Classes="segments" Rows="1" ColumnSpacing="4" Margin="0,0,0,8">
-                                        <ToggleButton x:Name="NarrowbandOffButton" Content="Off" IsChecked="True" Click="NarrowbandPalette_Click"
-                                                      ToolTip.Tip="Leave the channels as they are" />
-                                        <ToggleButton x:Name="NarrowbandShoButton" Content="SHO" Click="NarrowbandPalette_Click"
-                                                      ToolTip.Tip="SII in red, Hα in green, OIII in blue" />
-                                        <ToggleButton x:Name="NarrowbandHooButton" Content="HOO" Click="NarrowbandPalette_Click"
-                                                      ToolTip.Tip="Hα in red, OIII in green and blue" />
-                                    </UniformGrid>
-                                    <StackPanel x:Name="NarrowbandEditor" Spacing="8" IsVisible="False">
-                                        <controls:LabeledSlider x:Name="SiiBoostSlider" Label="SII boost" Minimum="0.5" Maximum="2"
-                                                                Step="0.01" Decimals="2" DefaultValue="1" Value="1"
-                                                                ValueChanged="NarrowbandSlider_ValueChanged" />
-                                        <controls:LabeledSlider x:Name="OiiiBoostSlider" Label="OIII boost" Minimum="0.5" Maximum="2"
-                                                                Step="0.01" Decimals="2" DefaultValue="1" Value="1"
-                                                                ValueChanged="NarrowbandSlider_ValueChanged" />
-                                        <controls:LabeledSlider x:Name="GreenReductionSlider" Label="Green reduction (SCNR)" Minimum="0" Maximum="100"
-                                                                Step="1" Unit="%" ValueChanged="NarrowbandSlider_ValueChanged" />
-                                        <TextBlock Text="Lightness" Margin="0,4,0,0" />
-                                        <UniformGrid Classes="segments" Rows="1" ColumnSpacing="4">
-                                            <ToggleButton x:Name="LightnessNormalisedButton" Content="Normalised" IsChecked="True" Click="NarrowbandLightness_Click"
-                                                          ToolTip.Tip="Keep the lightness of the normalised colours" />
-                                            <ToggleButton x:Name="LightnessOriginalButton" Content="Original" Click="NarrowbandLightness_Click"
-                                                          ToolTip.Tip="Keep each pixel's lightness from before normalising" />
-                                            <ToggleButton x:Name="LightnessHAlphaButton" Content="Hα" Click="NarrowbandLightness_Click"
-                                                          ToolTip.Tip="Take each pixel's lightness from the Hα channel" />
-                                        </UniformGrid>
-                                    </StackPanel>
-                                    <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
-                                               Text="Matches the SII and OIII channels to the Hα channel's background and spread, after Bill Blanshan's narrowband normalisation, to remove the strong Hα cast. It applies first, before the colour editor. Works best on a starless image after background neutralisation and an unlinked stretch." />
-                                </StackPanel>
-
-                                <TextBlock Text="Curves" Classes="strong" Margin="0,16,0,8" />
-                                <controls:CurvesView x:Name="ImageCurves" CurvesChanged="ImageCurves_CurvesChanged"
-                                                     Hint="Click the graph to add a point and drag to move it. Double-click or right-click a point, or drag it off the graph, to remove it. Moving the end points sets the black and white points." />
-
-                                <controls:LabeledSlider x:Name="GlobalSaturationSlider" Label="Saturation" Margin="0,16,0,0" Minimum="-100" Maximum="100" ShowSign="True"
-                                                        ValueChanged="GlobalSaturationSlider_ValueChanged" />
-                                <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
-                                           Text="Saturation applies to the whole image, after the colour editor and the curves." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
