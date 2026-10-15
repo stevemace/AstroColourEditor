@@ -285,8 +285,6 @@ public class TiffFileTests : IDisposable
     {
         var path = Write(3, 16, SampleFormat.UINT, (c, i) => i, extension: ".TIFF");
         Assert.IsType<TiffFile>(AstroImageFile.Load(path));
-        var (name, extensions) = AstroImageFile.SaveFormat(path);
-        Assert.Equal("TIFF image", name);
-        Assert.Equal([".tiff", ".tif"], extensions);
+        Assert.Equal(ImageFormat.Tiff, AstroImageFile.FormatOf(path));
     }
 }

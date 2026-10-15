@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using AstroColour.Core.Fits;
 using K4os.Compression.LZ4;
 
 namespace AstroColour.Core.Xisf;
@@ -32,6 +33,14 @@ public sealed class XisfFile : IAstroImage
     /// <summary>Pixel data, one plane per channel, normalised to [0,1] (floats may exceed this range).</summary>
     public float[][] Planes { get; }
 
+    public int BitsPerSample => BytesPerSample(SampleFormat) * 8;
+    public bool IsFloat => SampleFormat is XisfSampleFormat.Float32 or XisfSampleFormat.Float64;
+
+    public IReadOnlyList<FitsKeyword> FitsKeywords =>
+        _header.Root!.Elements(Ns + "Image").ElementAt(_imageIndex).Elements(Ns + "FITSKeyword")
+            .Select(k => new FitsKeyword((string?)k.Attribute("name") ?? "", (string?)k.Attribute("value") ?? "", (string?)k.Attribute("comment") ?? ""))
+            .ToList();
+
     public bool IsColour => Channels >= 3;
     public int PixelCount => Width * Height;
 
@@ -56,6 +65,38 @@ public sealed class XisfFile : IAstroImage
         BoundsHigh = hi;
         Planes = planes;
         _otherAttachments = otherAttachments;
+    }
+
+    /// <summary>
+    /// A new XISF file holding <paramref name="planes"/> (Gray, or RGB with three planes) in
+    /// <paramref name="format"/>, with <paramref name="keywords"/> as the image's FITS keywords.
+    /// </summary>
+    public static XisfFile Create(int width, int height, float[][] planes, XisfSampleFormat format, IEnumerable<FitsKeyword> keywords)
+    {
+        XNamespace xsi = "http://www.w3.org/2001/XMLSchema-instance";
+        int channels = planes.Length;
+        string colorSpace = channels >= 3 ? "RGB" : "Gray";
+        bool isFloat = format is XisfSampleFormat.Float32 or XisfSampleFormat.Float64;
+
+        var image = new XElement(Ns + "Image",
+            new XAttribute("geometry", $"{width}:{height}:{channels}"),
+            new XAttribute("sampleFormat", format.ToString()),
+            isFloat ? new XAttribute("bounds", "0:1") : null,
+            new XAttribute("colorSpace", colorSpace),
+            keywords.Select(k => new XElement(Ns + "FITSKeyword",
+                new XAttribute("name", k.Name), new XAttribute("value", k.Value), new XAttribute("comment", k.Comment))));
+        var metadata = new XElement(Ns + "Metadata",
+            new XElement(Ns + "Property", new XAttribute("id", "XISF:CreationTime"), new XAttribute("type", "TimePoint"),
+                new XAttribute("value", DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture))),
+            new XElement(Ns + "Property", new XAttribute("id", "XISF:CreatorApplication"), new XAttribute("type", "String"), "Astro Colour Editor"));
+        var root = new XElement(Ns + "xisf",
+            new XAttribute("version", "1.0"),
+            new XAttribute(XNamespace.Xmlns + "xsi", xsi),
+            new XAttribute(xsi + "schemaLocation", "http://www.pixinsight.com/xisf http://pixinsight.com/xisf/xisf-1.0.xsd"),
+            image, metadata);
+
+        return new XisfFile(new XDocument(new XDeclaration("1.0", "UTF-8", null), root), 0, width, height, channels,
+            format, colorSpace, 0, 1, planes, []);
     }
 
     // ---------------------------------------------------------------- loading

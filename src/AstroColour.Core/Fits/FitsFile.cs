@@ -28,6 +28,10 @@ public sealed class FitsFile : IAstroImage
         _ => "Float64",
     };
 
+    public int BitsPerSample => Math.Abs(Bitpix);
+    public bool IsFloat => Bitpix < 0;
+    public IReadOnlyList<FitsKeyword> FitsKeywords => _cards.Select(FitsKeyword.Parse).ToList();
+
     public float[][] Planes { get; }
     public bool IsColour => Channels >= 3;
     public int PixelCount => Width * Height;
@@ -61,6 +65,39 @@ public sealed class FitsFile : IAstroImage
         _unsignedInteger = unsignedInteger;
         BottomUp = bottomUp;
         Planes = planes;
+    }
+
+    /// <summary>
+    /// A new single-image FITS file holding <paramref name="planes"/> (mono, or RGB as three planes along NAXIS3)
+    /// with the given BITPIX, top row first. 16- and 32-bit integers are stored unsigned (with the standard BZERO
+    /// offset). <paramref name="keywords"/> are added after the layout keywords, skipping any that cannot be written.
+    /// </summary>
+    public static FitsFile Create(int width, int height, float[][] planes, int bitpix, IEnumerable<FitsKeyword> keywords)
+    {
+        if (bitpix is not (8 or 16 or 32 or -32 or -64))
+            throw new ArgumentOutOfRangeException(nameof(bitpix), bitpix, "Unsupported BITPIX.");
+        int channels = planes.Length;
+        bool unsigned = bitpix is 16 or 32;
+        double bzero = unsigned ? Math.Pow(2, bitpix - 1) : 0;
+        double high = bitpix switch { 8 => 255, 16 or 32 => Math.Pow(2, bitpix) - 1, _ => 1 };
+
+        var layout = new List<FitsKeyword>
+        {
+            new("SIMPLE", "T", "conforms to the FITS standard"),
+            new("BITPIX", bitpix.ToString(CultureInfo.InvariantCulture), bitpix < 0 ? "IEEE floating point" : $"{bitpix}-bit integers"),
+            new("NAXIS", channels == 1 ? "2" : "3", "number of axes"),
+            new("NAXIS1", width.ToString(CultureInfo.InvariantCulture), "width"),
+            new("NAXIS2", height.ToString(CultureInfo.InvariantCulture), "height"),
+        };
+        if (channels > 1) layout.Add(new("NAXIS3", channels.ToString(CultureInfo.InvariantCulture), "colour channels"));
+        if (unsigned)
+        {
+            layout.Add(new("BZERO", bzero.ToString(CultureInfo.InvariantCulture), "offset for unsigned integers"));
+            layout.Add(new("BSCALE", "1", "default scaling"));
+        }
+        var cards = layout.Concat(keywords).Select(k => k.ToCard()).OfType<string>().ToList();
+
+        return new FitsFile([], [], cards, width, height, channels, bitpix, bzero, 1, 0, high, unsigned, bottomUp: false, planes);
     }
 
     // ---------------------------------------------------------------- loading

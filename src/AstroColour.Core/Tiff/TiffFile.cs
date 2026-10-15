@@ -35,6 +35,7 @@ public sealed class TiffFile : IAstroImage
     public int BitsPerSample { get; }
     public SampleFormat SampleFormat { get; }
     public Compression Compression { get; }
+    public bool IsFloat => SampleFormat == SampleFormat.IEEEFP;
     public bool IsColour => _photometric == Photometric.RGB;
     public string ColorSpace => IsColour ? "RGB" : "Gray";
     public string SampleFormatName => (SampleFormat == SampleFormat.IEEEFP ? "Float" : SampleFormat == SampleFormat.INT ? "Int" : "UInt") + BitsPerSample;
@@ -69,6 +70,18 @@ public sealed class TiffFile : IAstroImage
         _low = low;
         _high = high;
         Planes = planes;
+    }
+
+    /// <summary>
+    /// A new greyscale (one plane) or RGB (three planes) TIFF holding <paramref name="planes"/> as unsigned
+    /// integers or floats of <paramref name="bitsPerSample"/> bits, LZW-compressed.
+    /// </summary>
+    public static TiffFile Create(int width, int height, float[][] planes, int bitsPerSample, bool isFloat)
+    {
+        var photometric = planes.Length >= 3 ? Photometric.RGB : Photometric.MINISBLACK;
+        double high = isFloat ? 1 : Math.Pow(2, bitsPerSample) - 1;
+        return new TiffFile(width, height, planes.Length, bitsPerSample, isFloat ? SampleFormat.IEEEFP : SampleFormat.UINT,
+            photometric, PlanarConfig.CONTIG, Compression.LZW, predictor: isFloat ? 1 : 2, [], 0, high, planes);
     }
 
     // ---------------------------------------------------------------- loading

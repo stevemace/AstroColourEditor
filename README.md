@@ -33,7 +33,7 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    matches its pixels, so it is removed on saving — plate-solve the saved image again if you need one.
 9. **Before** (B) toggles the original image for comparison.
 10. **Save** (Ctrl+S) overwrites the file after confirmation; **Save as** (Ctrl+Shift+S) writes a new file
-    in the same format as the original.
+    as XISF, FITS, TIFF, PNG or JPEG (the original's format is offered first). See [Saving in another format](#saving-in-another-format).
 
 Navigation: scroll wheel (or trackpad pinch) zooms around the cursor, drag pans (right-drag also pans while the picker is on),
 **Fit** (Ctrl+0) and **100%** (Ctrl+1).
@@ -74,6 +74,20 @@ Colour editing is intended for stretched (non-linear) images; the app warns when
   and EXIF data are not kept.
 - Palette, CMYK and YCbCr images are not supported.
 
+## Saving in another format
+
+Saving in the format the image was opened from keeps all of its metadata, as described above. Save as in another
+format writes a new file:
+
+- **XISF, FITS, TIFF**: the original sample format is kept (Float16 TIFF becomes Float32; signed integers become
+  unsigned). FITS and XISF carry the FITS keywords across (e.g. OBJECT, EXPTIME and the WCS); other metadata, such as
+  XISF properties (including PixInsight's astrometric solution), ICC profiles and TIFF tags, is not converted.
+  New FITS files are written top row first, without `ROWORDER`, and TIFF files are LZW-compressed.
+- **PNG**: 16-bit, or 8-bit if the original is 8-bit.
+- **JPEG**: 8-bit, quality 95, without chroma subsampling.
+- Extra channels such as alpha are dropped. PNG and JPEG files can't be opened in the editor; after saving one,
+  **Save** keeps writing to it from the full-precision image, so repeated saves don't lose quality.
+
 ## Building
 
 Requires the .NET 10 SDK.
@@ -104,7 +118,8 @@ right-click > Open. To distribute it, set `SIGN_IDENTITY` (a Developer ID certif
 
 ## Layout
 
-- `src/AstroColour.Core`: XISF, FITS and TIFF readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`, `Tiff/TiffFile.cs`) and the colour engine (`Colour/`), with no UI dependencies.
+- `src/AstroColour.Core`: XISF, FITS and TIFF readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`, `Tiff/TiffFile.cs`),
+  PNG and JPEG writers (`Png/`, `Jpeg/`, the latter using SkiaSharp), format selection (`AstroImage.cs`) and the colour engine (`Colour/`), with no UI dependencies.
 - `src/AstroColour.Desktop`: the Avalonia app (`macOS/` holds the app bundle's Info.plist and entitlements).
 - `tests/AstroColour.Tests`: unit tests for XISF, FITS and TIFF decoding/encoding and the colour maths.
 - `tools/make_icon.py`: draws the app icon (`src/AstroColour.Desktop/Assets/AppIcon.ico`, `.png` and `.icns`).

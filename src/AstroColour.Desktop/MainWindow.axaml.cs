@@ -243,19 +243,26 @@ public partial class MainWindow : Window
 
         if (saveAs)
         {
-            // Edits are saved in the format they were loaded from.
-            var (formatName, extensions) = AstroImageFile.SaveFormat(_path);
-            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            // The current file's format is offered first; the file's extension picks the format it is saved in.
+            var types = AstroImageFile.SaveFileTypes(_image, _path);
+            var choices = types.Select(t => new FilePickerFileType(t.Name) { Patterns = [.. t.Extensions.Select(x => "*" + x)] }).ToList();
+            var result = await StorageProvider.SaveFilePickerWithResultAsync(new FilePickerSaveOptions
             {
                 Title = "Save as",
-                SuggestedFileName = Path.GetFileNameWithoutExtension(_path) + "_colour" + extensions[0],
-                DefaultExtension = extensions[0].TrimStart('.'),
-                FileTypeChoices = [new FilePickerFileType(formatName) { Patterns = [.. extensions.Select(x => "*" + x)] }],
+                SuggestedFileName = Path.GetFileNameWithoutExtension(_path) + "_colour" + types[0].Extensions[0],
+                DefaultExtension = types[0].Extensions[0].TrimStart('.'),
+                FileTypeChoices = choices,
                 SuggestedStartLocation = await StartFolderAsync(),
                 ShowOverwritePrompt = true,
             });
-            if (file?.TryGetLocalPath() is not { } picked) return false;
+            if (result.File?.TryGetLocalPath() is not { } picked) return false;
             target = picked;
+            if (AstroImageFile.FormatOf(target) is null)
+            {
+                // No recognised extension was typed, so add the chosen file type's.
+                int chosen = Math.Max(0, choices.IndexOf(result.SelectedFileType!));
+                target += types[chosen].Extensions[0];
+            }
             _overwriteConfirmed = true;
         }
 
@@ -268,7 +275,7 @@ public partial class MainWindow : Window
             var saturation = GlobalSaturation;
             var stars = _stars is null ? null : new StarLayer(_stars, StarBrightness);
             var rotation = _rotation;
-            await Task.Run(() => image.Save(target, ColourProcessor.Apply(image, snapshot, curves, stars, saturation), rotation));
+            await Task.Run(() => AstroImageFile.Save(image, target, ColourProcessor.Apply(image, snapshot, curves, stars, saturation), rotation));
             _path = target;
             _isDirty = false;
             UpdateChrome();
