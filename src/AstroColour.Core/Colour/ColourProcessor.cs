@@ -7,7 +7,7 @@ namespace AstroColour.Core.Colour;
 
 public enum PreviewMode
 {
-    /// <summary>The image with all adjustments, curves, global saturation and stars applied.</summary>
+    /// <summary>The image with narrowband normalisation, all adjustments, curves, global saturation and stars applied.</summary>
     Adjusted,
     /// <summary>The unedited image, for before/after comparison.</summary>
     Original,
@@ -18,15 +18,16 @@ public enum PreviewMode
 public static class ColourProcessor
 {
     /// <summary>
-    /// Renders the image into an 8-bit BGRA buffer of Width×Height×4 bytes. Colour adjustments are
-    /// applied first, then <paramref name="curves"/>, then <paramref name="saturation"/>, then <paramref name="stars"/>
-    /// (which must match the image's size).
+    /// Renders the image into an 8-bit BGRA buffer of Width×Height×4 bytes. <paramref name="narrowband"/> normalisation
+    /// is applied first, then the colour adjustments, then <paramref name="curves"/>, then <paramref name="saturation"/>,
+    /// then <paramref name="stars"/> (which must match the image's size).
     /// </summary>
     /// <param name="saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
     public static void RenderPreview(RgbImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves,
         PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default, StarLayer? stars = null,
-        float saturation = 0f)
+        float saturation = 0f, NarrowbandNormalization? narrowband = null)
     {
+        if (mode == PreviewMode.Original) narrowband = null;
         var set = new AdjustmentSet(adjustments);
         var maskSet = mode == PreviewMode.Mask && mask is not null ? new AdjustmentSet([mask], includeAll: true) : null;
         var lookup = mode == PreviewMode.Adjusted && curves is not null ? new CurveLookup(curves) : null;
@@ -48,6 +49,7 @@ public static class ColourProcessor
             for (int i = row; i < row + width; i++)
             {
                 float r = rp[i], g = gp[i], b = bp[i];
+                narrowband?.Apply(ref r, ref g, ref b);
 
                 if (maskSet is not null)
                 {
@@ -74,12 +76,13 @@ public static class ColourProcessor
     }
 
     /// <summary>
-    /// Applies the adjustments, then the curves, then the global saturation, then the stars at full precision,
-    /// returning new planes for saving. A single-channel image takes only the curves and the stars' luminance.
+    /// Applies the narrowband normalisation, then the adjustments, then the curves, then the global saturation,
+    /// then the stars at full precision, returning new planes for saving. A single-channel image takes only the
+    /// curves and the stars' luminance.
     /// </summary>
     /// <param name="saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
     public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves = null,
-        StarLayer? stars = null, float saturation = 0f)
+        StarLayer? stars = null, float saturation = 0f, NarrowbandNormalization? narrowband = null)
     {
         var planes = image.Planes.Select(p => (float[])p.Clone()).ToArray();
         var lookup = curves is null ? null : new CurveLookup(curves, monochrome: !image.IsColour);
@@ -106,7 +109,7 @@ public static class ColourProcessor
         }
 
         var set = new AdjustmentSet(adjustments);
-        if (set.IsEmpty && lookup is null && saturation == 0f && stars is null) return planes;
+        if (narrowband is null && set.IsEmpty && lookup is null && saturation == 0f && stars is null) return planes;
 
         float[] rp = planes[0], gp = planes[1], bp = planes[2];
         Parallel.For(0, image.Height, [MethodImpl(MethodImplOptions.AggressiveOptimization)] (int y) =>
@@ -115,7 +118,9 @@ public static class ColourProcessor
             for (int i = row; i < row + width; i++)
             {
                 float r = rp[i], g = gp[i], b = bp[i];
-                bool changed = set.Adjust(ref r, ref g, ref b);
+                bool changed = narrowband is not null;
+                narrowband?.Apply(ref r, ref g, ref b);
+                changed |= set.Adjust(ref r, ref g, ref b);
                 if (lookup is not null)
                 {
                     lookup.Apply(ref r, ref g, ref b);

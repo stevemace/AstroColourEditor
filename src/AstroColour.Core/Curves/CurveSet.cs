@@ -38,7 +38,9 @@ public sealed class CurveSet
     /// (luminance for <see cref="CurveChannel.Rgb"/>). Bin heights are square-root scaled to [0,1].
     /// </summary>
     /// <param name="selection">If given, each pixel counts by how strongly this colour range selects it.</param>
-    public static float[][] Histogram(RgbImage image, int bins = 256, ColourAdjustment? selection = null)
+    /// <param name="narrowband">If given, the histogram is of the normalised image.</param>
+    public static float[][] Histogram(RgbImage image, int bins = 256, ColourAdjustment? selection = null,
+        NarrowbandNormalization? narrowband = null)
     {
         var counts = new double[4][];
         for (int c = 0; c < 4; c++) counts[c] = new double[bins];
@@ -47,6 +49,7 @@ public sealed class CurveSet
         for (int i = 0; i < image.PixelCount; i += step)
         {
             float r = image.R[i], g = image.G[i], b = image.B[i];
+            narrowband?.Apply(ref r, ref g, ref b);
             float w = 1f;
             if (weights is not null)
             {

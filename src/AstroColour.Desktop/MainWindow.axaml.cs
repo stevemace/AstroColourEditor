@@ -36,6 +36,9 @@ public partial class MainWindow : Window
     private PreviewLayer? _proxy;
     private int _proxyFactor = 1;
 
+    // Statistics of the full-resolution image's channels for narrowband normalisation (colour images only).
+    private ChannelStatistics? _channelStatistics;
+
     // Stars-only image added back over the edited image, at full resolution.
     private RgbImage? _stars;
 
@@ -172,13 +175,14 @@ public partial class MainWindow : Window
         SetBusy("Loading image…");
         try
         {
-            var (image, rgb, proxy, factor, median, histogram) = await Task.Run(() =>
+            var (image, rgb, proxy, factor, median, histogram, statistics) = await Task.Run(() =>
             {
                 var img = AstroImageFile.Load(path);
                 var full = RgbImage.From(img);
                 int factor = (int)Math.Ceiling(Math.Max(img.Width, img.Height) / (double)ProxyMaxSide);
                 var small = factor > 1 ? full.Downsample(factor) : null;
-                return (img, full, small, factor, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full));
+                return (img, full, small, factor, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full),
+                    img.IsColour ? ChannelStatistics.Measure(full) : null);
             });
 
             _image = image;
@@ -189,6 +193,8 @@ public partial class MainWindow : Window
             _curves.Reset();
             ImageCurves.Histogram = histogram;
             ImageCurves.ShowChannel(CurveChannel.Rgb);
+            _channelStatistics = statistics;
+            SetNarrowband(new NarrowbandSettings());
             SetGlobalSaturation(0);
             SetRotation(Rotation.None);
             ShowMaskToggle.IsChecked = false;
@@ -275,7 +281,9 @@ public partial class MainWindow : Window
             var saturation = GlobalSaturation;
             var stars = _stars is null ? null : new StarLayer(_stars, StarBrightness);
             var rotation = _rotation;
-            await Task.Run(() => AstroImageFile.Save(image, target, ColourProcessor.Apply(image, snapshot, curves, stars, saturation), rotation));
+            var narrowband = Narrowband;
+            await Task.Run(() => AstroImageFile.Save(image, target,
+                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband), rotation));
             _path = target;
             _isDirty = false;
             UpdateChrome();
@@ -419,6 +427,7 @@ public partial class MainWindow : Window
                 var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
                 var curves = _curves.Clone();
                 var saturation = GlobalSaturation;
+                var narrowband = Narrowband;
                 var mask = Selected?.Model.Clone();
                 var stars = layer.Stars is null ? null : new StarLayer(layer.Stars, StarBrightness);
                 var mode = CompareButton.IsChecked == true ? PreviewMode.Original
@@ -429,7 +438,7 @@ public partial class MainWindow : Window
                 if (layer == full) _fullRenderCancellation = cancellation;
                 try
                 {
-                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars, saturation));
+                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars, saturation, narrowband));
                 }
                 catch (OperationCanceledException)
                 {
@@ -500,6 +509,7 @@ public partial class MainWindow : Window
         if (x < 0 || y < 0 || x >= source.Width || y >= source.Height) return;
 
         var (r, g, b) = ColourProcessor.Sample(source, x, y, radius: 3);
+        Narrowband?.Apply(ref r, ref g, ref b); // pick the colour as it is shown
         ColourMath.RgbToHsl(r, g, b, out float hue, out _, out _, out float chroma);
         if (chroma < 0.01f)
         {
@@ -582,7 +592,7 @@ public partial class MainWindow : Window
     private void UpdateSelectionHistogram()
     {
         if (!ColourCurves.IsVisible || Selected is not { } item || (_proxy ?? _full) is not { } layer) return;
-        ColourCurves.Histogram = CurveSet.Histogram(layer.Source, selection: item.Model);
+        ColourCurves.Histogram = CurveSet.Histogram(layer.Source, selection: item.Model, narrowband: Narrowband);
     }
 
     private void ColourCurves_CurvesChanged(object? sender, bool interactive)
@@ -705,6 +715,69 @@ public partial class MainWindow : Window
         if (_suppressEditorEvents) return;
         MarkDirty();
         RequestRender(interactive: true);
+    }
+
+    // ------------------------------------------------------------ narrowband
+
+    private NarrowbandSettings _narrowband = new();
+
+    /// <summary>The normalisation for the current settings, or null when it is off.</summary>
+    private NarrowbandNormalization? Narrowband => NarrowbandNormalization.Create(_narrowband, _channelStatistics);
+
+    /// <summary>Shows <paramref name="settings"/> in the controls without treating it as an edit.</summary>
+    private void SetNarrowband(NarrowbandSettings settings)
+    {
+        _suppressEditorEvents = true;
+        NarrowbandOffButton.IsChecked = settings.Palette == NarrowbandPalette.Off;
+        NarrowbandShoButton.IsChecked = settings.Palette == NarrowbandPalette.Sho;
+        NarrowbandHooButton.IsChecked = settings.Palette == NarrowbandPalette.Hoo;
+        SiiBoostSlider.Value = settings.SiiBoost;
+        OiiiBoostSlider.Value = settings.OiiiBoost;
+        GreenReductionSlider.Value = settings.GreenReduction * 100;
+        LightnessNormalisedButton.IsChecked = settings.Lightness == NarrowbandLightness.Normalised;
+        LightnessOriginalButton.IsChecked = settings.Lightness == NarrowbandLightness.Original;
+        LightnessHAlphaButton.IsChecked = settings.Lightness == NarrowbandLightness.HAlpha;
+        NarrowbandEditor.IsVisible = !settings.IsEmpty;
+        SiiBoostSlider.IsVisible = settings.Palette != NarrowbandPalette.Hoo; // HOO has no SII
+        _suppressEditorEvents = false;
+        _narrowband = settings;
+    }
+
+    private void ChangeNarrowband(NarrowbandSettings settings, bool interactive)
+    {
+        SetNarrowband(settings);
+        MarkDirty();
+        if ((_proxy ?? _full) is { } layer)
+            ImageCurves.Histogram = CurveSet.Histogram(layer.Source, narrowband: Narrowband);
+        UpdateSelectionHistogram();
+        RequestRender(interactive);
+    }
+
+    private void NarrowbandPalette_Click(object? sender, RoutedEventArgs e)
+    {
+        var palette = sender == NarrowbandShoButton ? NarrowbandPalette.Sho
+            : sender == NarrowbandHooButton ? NarrowbandPalette.Hoo
+            : NarrowbandPalette.Off;
+        ChangeNarrowband(_narrowband with { Palette = palette }, interactive: false);
+    }
+
+    private void NarrowbandLightness_Click(object? sender, RoutedEventArgs e)
+    {
+        var lightness = sender == LightnessOriginalButton ? NarrowbandLightness.Original
+            : sender == LightnessHAlphaButton ? NarrowbandLightness.HAlpha
+            : NarrowbandLightness.Normalised;
+        ChangeNarrowband(_narrowband with { Lightness = lightness }, interactive: false);
+    }
+
+    private void NarrowbandSlider_ValueChanged(object? sender, EventArgs e)
+    {
+        if (_suppressEditorEvents) return;
+        ChangeNarrowband(_narrowband with
+        {
+            SiiBoost = (float)SiiBoostSlider.Value,
+            OiiiBoost = (float)OiiiBoostSlider.Value,
+            GreenReduction = (float)GreenReductionSlider.Value / 100f,
+        }, interactive: true);
     }
 
     // ----------------------------------------------------------------- stars
@@ -1089,7 +1162,7 @@ public partial class MainWindow : Window
         GlobalPanel.IsEnabled = loaded;
         StarsPanel.IsEnabled = loaded;
         // A single-channel image only has the composite curve, and no saturation to change.
-        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = loaded && _image!.IsColour;
+        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = NarrowbandSection.IsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
             RotateLeftButton.IsEnabled = RotateRightButton.IsEnabled =
             ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;

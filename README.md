@@ -18,8 +18,16 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    - **Centre hue / Range / Smoothness** set the hue band and how gently it fades.
    - **Protect neutrals** leaves near-grey pixels (background, white stars) alone.
 5. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider (or its label) to reset it.
-6. The **Global** tab edits the whole image, after the colour editor:
-   - **Curves** shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
+6. The **Global** tab edits the whole image:
+   - **Narrowband normalisation** (colour images; applied first, before the colour editor) balances a narrowband
+     image whose strong Hα signal swamps the other channels, after Bill Blanshan's PixelMath. Choose **SHO** (SII red,
+     Hα green, OIII blue) or **HOO** (Hα red, OIII green and blue). SII and OIII are matched to Hα's background and spread
+     with `(adev(Hα) / adev(c)) × (c − med(c)) + med(Hα)`, using statistics from the full-resolution image. Then:
+     **SII / OIII boost** multiply those channels; **Green reduction** applies SCNR (average neutral);
+     **Lightness** keeps the normalised lightness, the **Original** lightness, or takes it from **Hα**.
+     It works best on a starless image after background neutralisation and an unlinked stretch.
+     Colours picked in the colour editor are picked from the normalised image.
+   - **Curves** (after the colour editor) shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
      channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
      off the graph to remove it. Moving the end points sets the black and white points.
    - **Saturation** strengthens or mutes every colour in the image, after the curves.
