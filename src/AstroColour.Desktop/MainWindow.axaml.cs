@@ -196,6 +196,7 @@ public partial class MainWindow : Window
             _channelStatistics = statistics;
             SetNarrowband(new NarrowbandSettings());
             SetGlobalSaturation(0);
+            SetRemovePurple(0);
             SetRotation(Rotation.None);
             ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
@@ -279,11 +280,12 @@ public partial class MainWindow : Window
             var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
             var curves = _curves.Clone();
             var saturation = GlobalSaturation;
+            var removePurple = RemovePurple;
             var stars = _stars is null ? null : new StarLayer(_stars, StarBrightness);
             var rotation = _rotation;
             var narrowband = Narrowband;
             await Task.Run(() => AstroImageFile.Save(image, target,
-                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband), rotation));
+                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband, removePurple), rotation));
             _path = target;
             _isDirty = false;
             UpdateChrome();
@@ -427,6 +429,7 @@ public partial class MainWindow : Window
                 var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
                 var curves = _curves.Clone();
                 var saturation = GlobalSaturation;
+                var removePurple = RemovePurple;
                 var narrowband = Narrowband;
                 var mask = Selected?.Model.Clone();
                 var stars = layer.Stars is null ? null : new StarLayer(layer.Stars, StarBrightness);
@@ -438,7 +441,7 @@ public partial class MainWindow : Window
                 if (layer == full) _fullRenderCancellation = cancellation;
                 try
                 {
-                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars, saturation, narrowband));
+                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars, saturation, narrowband, removePurple));
                 }
                 catch (OperationCanceledException)
                 {
@@ -509,7 +512,7 @@ public partial class MainWindow : Window
         if (x < 0 || y < 0 || x >= source.Width || y >= source.Height) return;
 
         var (r, g, b) = ColourProcessor.Sample(source, x, y, radius: 3);
-        Narrowband?.Apply(ref r, ref g, ref b); // pick the colour as it is shown
+        BaseAdjustments?.Apply(ref r, ref g, ref b); // pick the colour as the colour editor sees it
         ColourMath.RgbToHsl(r, g, b, out float hue, out _, out _, out float chroma);
         if (chroma < 0.01f)
         {
@@ -592,7 +595,7 @@ public partial class MainWindow : Window
     private void UpdateSelectionHistogram()
     {
         if (!ColourCurves.IsVisible || Selected is not { } item || (_proxy ?? _full) is not { } layer) return;
-        ColourCurves.Histogram = CurveSet.Histogram(layer.Source, selection: item.Model, narrowband: Narrowband);
+        ColourCurves.Histogram = CurveSet.Histogram(layer.Source, selection: item.Model, baseAdjustments: BaseAdjustments);
     }
 
     private void ColourCurves_CurvesChanged(object? sender, bool interactive)
@@ -698,6 +701,7 @@ public partial class MainWindow : Window
     private void ImageCurves_CurvesChanged(object? sender, bool interactive)
     {
         MarkDirty();
+        UpdateSelectionHistogram();
         RequestRender(interactive);
     }
 
@@ -714,8 +718,22 @@ public partial class MainWindow : Window
     {
         if (_suppressEditorEvents) return;
         MarkDirty();
+        UpdateSelectionHistogram();
         RequestRender(interactive: true);
     }
+
+    private float RemovePurple => (float)RemovePurpleSlider.Value;
+
+    private void SetRemovePurple(double value)
+    {
+        _suppressEditorEvents = true;
+        RemovePurpleSlider.Value = value;
+        _suppressEditorEvents = false;
+    }
+
+    /// <summary>The changes made before the colour editor, or null when there are none.</summary>
+    private BaseAdjustments? BaseAdjustments =>
+        Core.Colour.BaseAdjustments.Create(Narrowband, new CurveLookup(_curves), GlobalSaturation, RemovePurple);
 
     // ------------------------------------------------------------ narrowband
 
@@ -747,8 +765,9 @@ public partial class MainWindow : Window
     {
         SetNarrowband(settings);
         MarkDirty();
+        // The Global curves act on the normalised image; the colour editor sees everything before it.
         if ((_proxy ?? _full) is { } layer)
-            ImageCurves.Histogram = CurveSet.Histogram(layer.Source, narrowband: Narrowband);
+            ImageCurves.Histogram = CurveSet.Histogram(layer.Source, baseAdjustments: Core.Colour.BaseAdjustments.Create(Narrowband));
         UpdateSelectionHistogram();
         RequestRender(interactive);
     }
@@ -1162,7 +1181,7 @@ public partial class MainWindow : Window
         GlobalPanel.IsEnabled = loaded;
         StarsPanel.IsEnabled = loaded;
         // A single-channel image only has the composite curve, and no saturation to change.
-        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = NarrowbandSection.IsEnabled = loaded && _image!.IsColour;
+        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = RemovePurpleSlider.IsEnabled = NarrowbandSection.IsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
             RotateLeftButton.IsEnabled = RotateRightButton.IsEnabled =
             ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;

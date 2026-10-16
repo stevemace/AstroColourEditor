@@ -197,7 +197,7 @@
                                         </UniformGrid>
                                     </StackPanel>
                                     <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
-                                               Text="Matches the SII and OIII channels to the Hα channel's background and spread, after Bill Blanshan's narrowband normalisation, to remove the strong Hα cast. It applies first, before the colour editor. Works best on a starless image after background neutralisation and an unlinked stretch." />
+                                               Text="Matches the SII and OIII channels to the Hα channel's background and spread, after Bill Blanshan's narrowband normalisation, to remove the strong Hα cast. It applies first, before everything else. Works best on a starless image after background neutralisation and an unlinked stretch." />
                                 </StackPanel>
 
                                 <TextBlock Text="Curves" Classes="strong" Margin="0,16,0,8" />
@@ -206,8 +206,10 @@
 
                                 <controls:LabeledSlider x:Name="GlobalSaturationSlider" Label="Saturation" Margin="0,16,0,0" Minimum="-100" Maximum="100" ShowSign="True"
                                                         ValueChanged="GlobalSaturationSlider_ValueChanged" />
+                                <controls:LabeledSlider x:Name="RemovePurpleSlider" Label="Remove purple" Margin="0,8,0,0" Minimum="0" Maximum="1"
+                                                        Step="0.01" Decimals="2" ValueChanged="GlobalSaturationSlider_ValueChanged" />
                                 <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
-                                           Text="Saturation applies to the whole image, after the colour editor and the curves." />
+                                           Text="Saturation applies to the whole image, after the curves. Remove purple then moves green towards the average of red and blue, turning purple towards neutral. Both apply before the colour editor." />
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>

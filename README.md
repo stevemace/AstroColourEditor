@@ -19,19 +19,24 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    - **Protect neutrals** leaves near-grey pixels (background, white stars) alone.
 5. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider (or its label) to reset it.
 6. The **Global** tab edits the whole image:
-   - **Narrowband normalisation** (colour images; applied first, before the colour editor) balances a narrowband
+   - **Narrowband normalisation** (colour images; applied first, before everything else) balances a narrowband
      image whose strong Hα signal swamps the other channels, after Bill Blanshan's PixelMath. Choose **SHO** (SII red,
      Hα green, OIII blue) or **HOO** (Hα red, OIII green and blue). SII and OIII are matched to Hα's background and spread
      with `(adev(Hα) / adev(c)) × (c − med(c)) + med(Hα)`, using statistics from the full-resolution image. Then:
      **SII / OIII boost** multiply those channels; **Green reduction** applies SCNR (average neutral);
      **Lightness** keeps the normalised lightness, the **Original** lightness, or takes it from **Hα**.
      It works best on a starless image after background neutralisation and an unlinked stretch.
-     Colours picked in the colour editor are picked from the normalised image.
-   - **Curves** (after the colour editor) shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
+   - **Curves** (after the narrowband normalisation) shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
      channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
      off the graph to remove it. Moving the end points sets the black and white points.
    - **Saturation** strengthens or mutes every colour in the image, after the curves.
+   - **Remove purple** (0–1, after the saturation) moves green towards the average of red and blue with the pixel math
+     `G: $T[1] + x * (($T[0] + $T[2]) / 2 - $T[1])`, turning purple (e.g. star halos) towards neutral.
    Curves also work on monochrome images (RGB curve only).
+
+   The edits apply in this order: narrowband normalisation, curves, saturation, remove purple, the colour editor,
+   then stars. The colour editor's picker, its selected range and its curves' histogram see the image after
+   the Global tab's edits.
 7. On the **Stars** tab, **Add stars image…** loads a stars-only image (e.g. from StarXTerminator) the same size as
    the open (starless) image and adds it back with the pixel math `~((~starless) * (~(stars * x)))`. The
    **Star brightness (x)** slider (0–1) sets how bright the stars are. Stars go on after the colour editor and
