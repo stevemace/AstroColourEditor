@@ -197,7 +197,7 @@
                                         </UniformGrid>
                                     </StackPanel>
                                     <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
-                                               Text="Matches the SII and OIII channels to the Hα channel's background and spread, after Bill Blanshan's narrowband normalisation, to remove the strong Hα cast. It applies first, before everything else. Works best on a starless image after background neutralisation and an unlinked stretch." />
+                                               Text="Stretches the SII and OIII signal above each channel's background to match the strength of the Hα signal, as in PixInsight's NarrowbandNormalization, to remove the strong Hα cast. It applies first, before everything else. Works best on a starless image after background neutralisation and an unlinked stretch." />
                                 </StackPanel>
 
                                 <TextBlock Text="Curves" Classes="strong" Margin="0,16,0,8" />

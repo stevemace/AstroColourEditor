@@ -7,7 +7,7 @@ public class NarrowbandNormalizationTests
 {
     private const int W = 40, H = 25;
 
-    /// <summary>A green-heavy SHO-like image: each channel is a ramp with its own background and spread.</summary>
+    /// <summary>A green-heavy SHO-like image: each channel is a ramp with its own background and signal strength.</summary>
     private static RgbImage ShoImage()
     {
         var r = new float[W * H];
@@ -39,43 +39,71 @@ public class NarrowbandNormalizationTests
         return new RgbImage(image.Width, image.Height, r, g, b);
     }
 
+    private static (float R, float G, float B) NormalisePixel(NarrowbandNormalization nb, float r, float g, float b)
+    {
+        nb.Apply(ref r, ref g, ref b);
+        return (r, g, b);
+    }
+
     [Fact]
-    public void Measures_median_and_average_absolute_deviation()
+    public void Measures_median_and_average_positive_deviation()
     {
         float[] values = [0.1f, 0.2f, 0.3f, 0.4f, 0.9f];
         var stats = ChannelStatistics.Measure(new RgbImage(5, 1, values, values, values));
         Assert.Equal(0.3f, stats.Median[0], 1e-4f);
-        // |−0.2| + |−0.1| + 0 + 0.1 + 0.6 = 1.0, over 5 pixels.
-        Assert.Equal(0.2f, stats.AverageDeviation[1], 1e-4f);
+        // Only the pixels above the median count: (0.1 + 0.6) / 2.
+        Assert.Equal(0.35f, stats.PositiveDeviation[1], 1e-4f);
     }
 
     [Fact]
-    public void Sho_matches_sii_and_oiii_to_the_h_alpha_statistics()
+    public void Mtf_matches_pixinsight()
+    {
+        Assert.Equal(0.3f, NarrowbandNormalization.Mtf(0.5f, 0.3f), 1e-6f);
+        Assert.Equal(0.5f, NarrowbandNormalization.Mtf(0.25f, 0.25f), 1e-6f); // m maps to 0.5
+        Assert.Equal(0f, NarrowbandNormalization.Mtf(0.1f, 0f));
+        Assert.Equal(1f, NarrowbandNormalization.Mtf(0.1f, 1f));
+    }
+
+    [Fact]
+    public void Sho_stretches_sii_and_oiii_to_the_h_alpha_positive_deviation()
     {
         var image = ShoImage();
-        var before = ChannelStatistics.Measure(image);
-        var after = ChannelStatistics.Measure(Normalise(image, new NarrowbandSettings(NarrowbandPalette.Sho)));
+        var stats = ChannelStatistics.Measure(image);
+        var nb = NarrowbandNormalization.Create(new NarrowbandSettings(NarrowbandPalette.Sho), stats)!;
+        float Unscreened(int c) => stats.PositiveDeviation[c] / (1 - stats.Median[c]);
 
-        foreach (int c in new[] { 0, 2 })
-        {
-            Assert.Equal(before.Median[1], after.Median[c], 2e-3f);
-            Assert.Equal(before.AverageDeviation[1], after.AverageDeviation[c], 2e-3f);
-        }
-        // Hα itself is untouched.
-        Assert.Equal(before.Median[1], after.Median[1], 1e-6f);
-        Assert.Equal(before.AverageDeviation[1], after.AverageDeviation[1], 1e-6f);
+        // A pixel one average positive deviation above each channel's median lands where Hα's does, unscreened.
+        float[] probe = [stats.Median[0] + stats.PositiveDeviation[0], 0.5f, stats.Median[2] + stats.PositiveDeviation[2]];
+        var (r, g, b) = NormalisePixel(nb, probe[0], probe[1], probe[2]);
+        Assert.Equal(stats.Median[0] + Unscreened(1) * (1 - stats.Median[0]), r, 1e-4f);
+        Assert.Equal(stats.Median[2] + Unscreened(1) * (1 - stats.Median[2]), b, 1e-4f);
+        Assert.Equal(0.5f, g); // Hα itself is untouched
+
+        // The background point stays put, and anything darker is left alone.
+        Assert.Equal(stats.Median[0], NormalisePixel(nb, stats.Median[0], 0.5f, 0.5f).R, 1e-6f);
+        Assert.Equal(stats.Median[0] - 0.01f, NormalisePixel(nb, stats.Median[0] - 0.01f, 0.5f, 0.5f).R);
+        Assert.Equal(1f, NormalisePixel(nb, 1f, 0.5f, 1f).R, 1e-6f);
+
+        // The faint SII channel is lifted; the stretch keeps every value in range without clipping.
+        var after = Normalise(image, new NarrowbandSettings(NarrowbandPalette.Sho));
+        Assert.True(ChannelStatistics.Measure(after).PositiveDeviation[0] > stats.PositiveDeviation[0]);
+        Assert.Equal(stats.Median[0], ChannelStatistics.Measure(after).Median[0], 1e-4f);
     }
 
     [Fact]
-    public void Hoo_matches_both_oiii_channels_to_h_alpha_in_red()
+    public void Hoo_stretches_both_oiii_channels_to_h_alpha_in_red()
     {
         var sho = ShoImage();
         var hoo = new RgbImage(W, H, sho.G, sho.B, sho.B); // Hα red, OIII green and blue
-        var before = ChannelStatistics.Measure(hoo);
-        var after = ChannelStatistics.Measure(Normalise(hoo, new NarrowbandSettings(NarrowbandPalette.Hoo)));
-        foreach (int c in new[] { 1, 2 })
-            Assert.Equal(before.Median[0], after.Median[c], 2e-3f);
-        Assert.Equal(before.AverageDeviation[0], after.AverageDeviation[0], 1e-6f);
+        var stats = ChannelStatistics.Measure(hoo);
+        var nb = NarrowbandNormalization.Create(new NarrowbandSettings(NarrowbandPalette.Hoo), stats)!;
+        float target = stats.PositiveDeviation[0] / (1 - stats.Median[0]);
+
+        float oiii = stats.Median[1] + stats.PositiveDeviation[1];
+        var (r, g, b) = NormalisePixel(nb, 0.5f, oiii, oiii);
+        Assert.Equal(0.5f, r);
+        Assert.Equal(stats.Median[1] + target * (1 - stats.Median[1]), g, 1e-4f);
+        Assert.Equal(g, b, 1e-6f);
     }
 
     [Fact]

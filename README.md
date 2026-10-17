@@ -21,8 +21,10 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
 6. The **Global** tab edits the whole image:
    - **Narrowband normalisation** (colour images; applied first, before everything else) balances a narrowband
      image whose strong Hα signal swamps the other channels, after Bill Blanshan's PixelMath. Choose **SHO** (SII red,
-     Hα green, OIII blue) or **HOO** (Hα red, OIII green and blue). SII and OIII are matched to Hα's background and spread
-     with `(adev(Hα) / adev(c)) × (c − med(c)) + med(Hα)`, using statistics from the full-resolution image. Then:
+     Hα green, OIII blue) or **HOO** (Hα red, OIII green and blue). As in PixInsight's NarrowbandNormalization (shadow point 1),
+     the signal above each SII and OIII channel's median is stretched with a midtones transfer function so that its
+     average positive deviation from the median matches Hα's; the background and anything darker are left alone.
+     The statistics come from the full-resolution image. Then:
      **SII / OIII boost** multiply those channels; **Green reduction** applies SCNR (average neutral);
      **Lightness** keeps the normalised lightness, the **Original** lightness, or takes it from **Hα**.
      It works best on a starless image after background neutralisation and an unlinked stretch.
