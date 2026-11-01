@@ -25,6 +25,8 @@
     <PackageReference Include="Avalonia" Version="12.1.3" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageReference Include="Sdcb.LibRaw.runtime.linux64" Version="0.21.1" />
+    <PackageReference Include="Sdcb.LibRaw.runtime.win64" Version="0.21.1" />
   </ItemGroup>
 
 </Project>

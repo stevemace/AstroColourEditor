@@ -1,6 +1,6 @@
 # Astro Colour Editor
 
-A desktop tool for selective colour editing of `.xisf`, FITS and TIFF images, modelled on
+A desktop tool for selective colour editing of `.xisf`, FITS, TIFF and camera raw images, modelled on
 Capture One's colour editor. It runs on Windows and macOS (Avalonia UI).
 
 ## Using it
@@ -9,6 +9,11 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
 
 1. **Open** (Ctrl+O) an `.xisf`, `.fits`, `.fit`, `.fts`, `.tif` or `.tiff` image, or pass a file path on the command line / drag it onto the exe
    (on a Mac: Finder's "Open With", or drop it on the Dock icon).
+   Camera raw files (Nikon `.nef`/`.nrw`, Canon `.cr2`/`.cr3`, Sony `.arw`, Fuji `.raf`, Olympus `.orf`, Panasonic `.rw2`,
+   Pentax `.pef`, Samsung `.srw` and `.dng`) open too, developed like a photo by [LibRaw](https://www.libraw.org/): camera
+   white balance, sRGB, 16-bit, with no automatic brightening so highlights aren't clipped. The camera, exposure time,
+   ISO, focal length, f-number and capture time become FITS keywords. A raw file can't be written, so saving always
+   asks for a new file (TIFF by default). Raw files open on Windows and Linux; macOS needs LibRaw bundled (not done yet).
 2. Turn on **Pick colour from image** (P) and click a colour in the image. A new entry appears in the list.
 3. Under **Edit with**, choose **HSL** to adjust that colour's **Hue**, **Saturation** and **Lightness**, or
    **Curves** to shape its tones with RGB / Red / Green / Blue curves drawn over a histogram of just the selected
@@ -30,7 +35,8 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
      It works best on a starless image after background neutralisation and an unlinked stretch.
    - **Curves** (after the narrowband normalisation) shape the tones of the composite **RGB** curve or of the **Red**, **Green** and **Blue**
      channels over the image's histogram. Click to add a point and drag it; double-click, right-click or drag a point
-     off the graph to remove it. Moving the end points sets the black and white points.
+     off the graph to remove it. Moving the end points sets the black and white points. Below the graph, the share
+     of pixels the curves clip to black and to white is shown (for RGB, a pixel counts if any of its channels clips).
    - **Saturation** strengthens or mutes every colour in the image, after the curves.
    - **Remove purple** (0–1, after the saturation) moves green towards the average of red and blue with the pixel math
      `G: $T[1] + x * (($T[0] + $T[2]) / 2 - $T[1])`, turning purple (e.g. star halos) towards neutral.
@@ -134,7 +140,7 @@ right-click > Open. To distribute it, set `SIGN_IDENTITY` (a Developer ID certif
 ## Layout
 
 - `src/AstroColour.Core`: XISF, FITS and TIFF readers/writers (`Xisf/XisfFile.cs`, `Fits/FitsFile.cs`, `Tiff/TiffFile.cs`),
-  PNG and JPEG writers (`Png/`, `Jpeg/`, the latter using SkiaSharp), format selection (`AstroImage.cs`) and the colour engine (`Colour/`), with no UI dependencies.
+  PNG and JPEG writers (`Png/`, `Jpeg/`, the latter using SkiaSharp), the camera raw reader (`Raw/RawFile.cs`, using LibRaw), format selection (`AstroImage.cs`) and the colour engine (`Colour/`), with no UI dependencies.
 - `src/AstroColour.Desktop`: the Avalonia app (`macOS/` holds the app bundle's Info.plist and entitlements).
 - `tests/AstroColour.Tests`: unit tests for XISF, FITS and TIFF decoding/encoding and the colour maths.
 - `tools/make_icon.py`: draws the app icon (`src/AstroColour.Desktop/Assets/AppIcon.ico`, `.png` and `.icns`).
@@ -142,3 +148,9 @@ right-click > Open. To distribute it, set `SIGN_IDENTITY` (a Developer ID certif
 
 If the app crashes, details are written to `%LOCALAPPDATA%\AstroColourEditor\crash.log`
 (`~/Library/Application Support/AstroColourEditor/crash.log` on a Mac).
+
+## Third-party licences
+
+Camera raw decoding uses [LibRaw](https://www.libraw.org/), licensed under LGPL 2.1 or CDDL 1.0, through the MIT-licensed
+[Sdcb.LibRaw](https://github.com/sdcb/Sdcb.LibRaw) wrapper. LibRaw ships as a separate native library (`raw_r.dll`,
+`libraw_r.so`) alongside the app.

@@ -20,6 +20,9 @@
 
         <controls:CurveEditor x:Name="Graph" CurveChanged="Graph_CurveChanged" />
 
+        <TextBlock x:Name="ClippingText" IsVisible="False" FontSize="12" TextWrapping="Wrap"
+                   ToolTip.Tip="The share of pixels this curve clips to black or white. For RGB, a pixel counts if any of its channels clips. Pixels already black or white before the curves are not counted." />
+
         <Grid>
             <TextBlock x:Name="ChannelText" FontWeight="SemiBold" VerticalAlignment="Center" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">

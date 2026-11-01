@@ -81,7 +81,7 @@ public partial class MainWindow : Window
         GlobalSaturationSlider.GradientBrush = Ramp(Hsl(0, 0, 0.5f), Hsl(0, 1, 0.5f));
         ImageCurves.Curves = _curves;
 
-        SetShortcutTip(OpenButton, "Open an XISF, FITS or TIFF image", "O");
+        SetShortcutTip(OpenButton, "Open an XISF, FITS, TIFF or camera raw image", "O");
         SetShortcutTip(SaveButton, "Save over the current file", "S");
         SetShortcutTip(SaveAsButton, "Save to a new file", "S", shift: true);
         SetShortcutTip(RotateLeftButton, "Rotate 90° anticlockwise", "[");
@@ -149,7 +149,7 @@ public partial class MainWindow : Window
         {
             Title = "Open image",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("XISF, FITS or TIFF image") { Patterns = [.. AstroImageFile.AllExtensions.Select(x => "*" + x)] }],
+            FileTypeFilter = [new FilePickerFileType("XISF, FITS, TIFF or camera raw image") { Patterns = [.. AstroImageFile.AllExtensions.Select(x => "*" + x)] }],
             SuggestedStartLocation = await StartFolderAsync(),
         });
         if (files is [var file] && file.TryGetLocalPath() is { } path) await LoadAsync(path);
@@ -175,14 +175,14 @@ public partial class MainWindow : Window
         SetBusy("Loading image…");
         try
         {
-            var (image, rgb, proxy, factor, median, histogram, statistics) = await Task.Run(() =>
+            var (image, rgb, proxy, factor, median, histogram, clipping, statistics) = await Task.Run(() =>
             {
                 var img = AstroImageFile.Load(path);
                 var full = RgbImage.From(img);
                 int factor = (int)Math.Ceiling(Math.Max(img.Width, img.Height) / (double)ProxyMaxSide);
                 var small = factor > 1 ? full.Downsample(factor) : null;
                 return (img, full, small, factor, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full),
-                    img.IsColour ? ChannelStatistics.Measure(full) : null);
+                    CurveClipping.Sample(small ?? full), img.IsColour ? ChannelStatistics.Measure(full) : null);
             });
 
             _image = image;
@@ -192,6 +192,7 @@ public partial class MainWindow : Window
             _adjustments.Clear();
             _curves.Reset();
             ImageCurves.Histogram = histogram;
+            ImageCurves.Clipping = clipping;
             ImageCurves.ShowChannel(CurveChannel.Rgb);
             _channelStatistics = statistics;
             SetNarrowband(new NarrowbandSettings());
@@ -238,6 +239,7 @@ public partial class MainWindow : Window
         if (_image is null || _path is null) return false;
 
         string target = _path;
+        if (AstroImageFile.IsRaw(target)) saveAs = true; // raw files cannot be written
         if (!saveAs && !_overwriteConfirmed)
         {
             var choice = await ShowDialogAsync("Overwrite the original file?",
@@ -767,7 +769,11 @@ public partial class MainWindow : Window
         MarkDirty();
         // The Global curves act on the normalised image; the colour editor sees everything before it.
         if ((_proxy ?? _full) is { } layer)
-            ImageCurves.Histogram = CurveSet.Histogram(layer.Source, baseAdjustments: Core.Colour.BaseAdjustments.Create(Narrowband));
+        {
+            var narrowband = Core.Colour.BaseAdjustments.Create(Narrowband);
+            ImageCurves.Histogram = CurveSet.Histogram(layer.Source, baseAdjustments: narrowband);
+            ImageCurves.Clipping = CurveClipping.Sample(layer.Source, narrowband);
+        }
         UpdateSelectionHistogram();
         RequestRender(interactive);
     }
@@ -810,7 +816,7 @@ public partial class MainWindow : Window
         {
             Title = "Add stars image",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("XISF, FITS or TIFF image") { Patterns = [.. AstroImageFile.AllExtensions.Select(x => "*" + x)] }],
+            FileTypeFilter = [new FilePickerFileType("XISF, FITS, TIFF or camera raw image") { Patterns = [.. AstroImageFile.AllExtensions.Select(x => "*" + x)] }],
             SuggestedStartLocation = await StartFolderAsync(),
         });
         if (files is not [var file] || file.TryGetLocalPath() is not { } path) return;

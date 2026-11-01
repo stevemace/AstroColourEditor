@@ -1,6 +1,7 @@
 using AstroColour.Core.Fits;
 using AstroColour.Core.Jpeg;
 using AstroColour.Core.Png;
+using AstroColour.Core.Raw;
 using AstroColour.Core.Tiff;
 using AstroColour.Core.Xisf;
 
@@ -52,8 +53,12 @@ public static class AstroImageFile
     public static readonly string[] PngExtensions = [".png"];
     public static readonly string[] JpegExtensions = [".jpg", ".jpeg"];
 
+    /// <summary>Camera raw formats, which can be opened but not saved.</summary>
+    public static readonly string[] RawExtensions =
+        [".nef", ".nrw", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".rw2", ".pef", ".dng", ".srw"];
+
     /// <summary>The extensions of files that can be opened.</summary>
-    public static readonly string[] AllExtensions = [.. XisfExtensions, .. FitsExtensions, .. TiffExtensions];
+    public static readonly string[] AllExtensions = [.. XisfExtensions, .. FitsExtensions, .. TiffExtensions, .. RawExtensions];
 
     /// <summary>Every format an image can be saved in.</summary>
     public static readonly IReadOnlyList<ImageFileType> FileTypes =
@@ -69,19 +74,22 @@ public static class AstroImageFile
 
     public static bool IsTiff(string path) => HasExtension(path, TiffExtensions);
 
-    /// <summary>Loads an XISF, FITS or TIFF file, chosen by its extension.</summary>
+    /// <summary>True for a camera raw file, which can only be saved to a new file in another format.</summary>
+    public static bool IsRaw(string path) => HasExtension(path, RawExtensions);
+
+    /// <summary>Loads an XISF, FITS, TIFF or camera raw file, chosen by its extension.</summary>
     public static IAstroImage Load(string path) =>
-        IsFits(path) ? FitsFile.Load(path) : IsTiff(path) ? TiffFile.Load(path) : XisfFile.Load(path);
+        IsFits(path) ? FitsFile.Load(path) : IsTiff(path) ? TiffFile.Load(path) : IsRaw(path) ? RawFile.Load(path) : XisfFile.Load(path);
 
     /// <summary>The format a file is saved in, chosen by its extension, or null if no format uses it.</summary>
     public static ImageFormat? FormatOf(string path) =>
         FileTypes.FirstOrDefault(t => HasExtension(path, t.Extensions))?.Format;
 
-    /// <summary>The format <paramref name="image"/> was loaded from.</summary>
+    /// <summary>The format <paramref name="image"/> was loaded from, or for a raw file the one it is saved in by default.</summary>
     public static ImageFormat FormatOf(IAstroImage image) => image switch
     {
         FitsFile => ImageFormat.Fits,
-        TiffFile => ImageFormat.Tiff,
+        TiffFile or RawFile => ImageFormat.Tiff,
         _ => ImageFormat.Xisf,
     };
 
@@ -113,7 +121,7 @@ public static class AstroImageFile
     {
         var format = FormatOf(path)
             ?? throw new NotSupportedException($"Cannot save a “{Path.GetExtension(path)}” file. Choose XISF, FITS, TIFF, PNG or JPEG.");
-        if (format == FormatOf(image))
+        if (format == FormatOf(image) && image is not RawFile)
         {
             image.Save(path, planes, rotation);
             return;
