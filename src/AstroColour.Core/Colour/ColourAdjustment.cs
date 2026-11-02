@@ -3,12 +3,22 @@ using AstroColour.Core.Curves;
 
 namespace AstroColour.Core.Colour;
 
+/// <summary>How a <see cref="ColourAdjustment"/> measures brightness for its lightness limits.</summary>
+public enum BrightnessMeasure
+{
+    /// <summary>HSL lightness, (max + min) / 2: a fully saturated colour is always 50%.</summary>
+    Lightness,
+    /// <summary>Rec. 709 luminance, 0.2126 R + 0.7152 G + 0.0722 B: how bright the colour looks.</summary>
+    Luminance,
+}
+
 /// <summary>
 /// One colour range and the changes applied to it, in the style of Capture One's
 /// Advanced colour editor: HSL shifts, tone curves, or both. Pixels whose hue lies within <see cref="Range"/> degrees of
 /// <see cref="TargetHue"/> receive the full adjustment, which then fades out over a
 /// further <see cref="Smoothness"/> degrees. The selection can also be limited to pixels
-/// whose HSL lightness lies between <see cref="LightnessMin"/> and <see cref="LightnessMax"/>.
+/// whose brightness (HSL lightness or luminance, see <see cref="LimitBy"/>) lies between <see cref="LightnessMin"/>
+/// and <see cref="LightnessMax"/>.
 /// </summary>
 public sealed class ColourAdjustment
 {
@@ -27,10 +37,13 @@ public sealed class ColourAdjustment
     /// </summary>
     public float NeutralProtection { get; set; } = 5f;
 
-    /// <summary>HSL lightness, as a percentage, below which pixels are excluded.</summary>
+    /// <summary>What <see cref="LightnessMin"/> and <see cref="LightnessMax"/> are measured in.</summary>
+    public BrightnessMeasure LimitBy { get; set; }
+
+    /// <summary>Brightness (see <see cref="LimitBy"/>), as a percentage, below which pixels are excluded.</summary>
     public float LightnessMin { get; set; }
 
-    /// <summary>HSL lightness, as a percentage, above which pixels are excluded.</summary>
+    /// <summary>Brightness (see <see cref="LimitBy"/>), as a percentage, above which pixels are excluded.</summary>
     public float LightnessMax { get; set; } = 100f;
 
     /// <summary>Width, as a percentage of lightness, of the falloff beyond the lightness limits.</summary>
@@ -73,7 +86,8 @@ public sealed class ColourAdjustment
         Lightness = 0;
     }
 
-    /// <summary>How strongly (0..1) a pixel with the given hue, chroma and lightness is selected.</summary>
+    /// <summary>How strongly (0..1) a pixel with the given hue, chroma and brightness is selected.</summary>
+    /// <param name="lightness">The pixel's brightness as <see cref="LimitBy"/> measures it.</param>
     public float Weight(float hue, float chroma, float lightness)
     {
         float chromaWeight = NeutralProtection <= 0 ? 1f : SmoothStep(0f, NeutralProtection / 100f, chroma);

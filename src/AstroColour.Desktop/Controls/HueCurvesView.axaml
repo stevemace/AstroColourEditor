@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:AstroColour.Desktop.Controls"
+             x:Class="AstroColour.Desktop.Controls.HueCurvesView">
+    <UserControl.Styles>
+        <Style Selector="UniformGrid#Kinds > ToggleButton">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="4,5" />
+        </Style>
+    </UserControl.Styles>
+    <StackPanel Spacing="12">
+        <UniformGrid x:Name="Kinds" Rows="1" ColumnSpacing="4">
+            <ToggleButton x:Name="HueButton" Content="Hue vs hue" IsChecked="True" Click="Kind_Click"
+                          ToolTip.Tip="Shift each hue towards its neighbours" />
+            <ToggleButton x:Name="SaturationButton" Content="Hue vs saturation" Click="Kind_Click"
+                          ToolTip.Tip="Strengthen or mute each hue" />
+        </UniformGrid>
+
+        <controls:HueCurveEditor x:Name="Graph" CurveChanged="Graph_CurveChanged" />
+
+        <Grid>
+            <TextBlock x:Name="KindText" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                <HyperlinkButton Content="Reset" Padding="4,2" Click="Reset_Click"
+                                 ToolTip.Tip="Reset this curve" />
+                <HyperlinkButton Content="Reset both" Padding="4,2" Click="ResetAll_Click"
+                                 ToolTip.Tip="Reset the hue and the saturation curve" />
+            </StackPanel>
+        </Grid>
+        <TextBlock x:Name="HintText" TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
+    </StackPanel>
+</UserControl>

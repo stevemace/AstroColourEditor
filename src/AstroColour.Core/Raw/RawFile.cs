@@ -98,6 +98,6 @@ public sealed class RawFile : IAstroImage
 
     private static string Number(float v) => v.ToString("0.######", CultureInfo.InvariantCulture);
 
-    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None) =>
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None, CropRect? crop = null) =>
         throw new NotSupportedException("Camera raw files cannot be written. Save as XISF, FITS, TIFF, PNG or JPEG.");
 }

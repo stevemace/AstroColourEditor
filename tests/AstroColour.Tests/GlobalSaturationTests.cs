@@ -50,6 +50,6 @@ public class GlobalSaturationTests
         public string ColorSpace => planes.Length >= 3 ? "RGB" : "Gray";
         public string SampleFormatName => "Float32";
         public float[][] Planes => planes;
-        public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None) => throw new NotSupportedException();
+        public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None, CropRect? crop = null) => throw new NotSupportedException();
     }
 }

@@ -7,6 +7,7 @@ using AstroColour.Core.Stars;
 using AstroColour.Desktop.Controls;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -23,8 +24,23 @@ public partial class MainWindow : Window
 
     private readonly ObservableCollection<AdjustmentItem> _adjustments = [];
     private readonly CurveSet _curves = new();
+    private readonly HueCurveSet _hueCurves = new();
     private bool _preferColourCurves; // edit newly picked colours with curves rather than HSL
     private Rotation _rotation;
+    private CropRect? _crop;      // in the image's own pixel coordinates, before rotation; null keeps the whole image
+    private bool _cropEditing;
+
+    // Undo and redo. The image has unsaved edits unless the current state is the one last opened or saved.
+    private readonly EditHistory _history = new();
+    private long _savedStateId;
+    private bool _restoring; // applying an undo or redo, so control changes are not edits
+
+    private readonly AppSettings _settings = AppSettings.Load();
+
+    // Split before/after view: where the divider is, as a fraction of the viewport's width.
+    private double _splitFraction = 0.5;
+    private bool _splitDragging;
+    private readonly DispatcherTimer _hueHistogramTimer;
 
     // Images longer than this are previewed at reduced size while sliders move.
     private const int ProxyMaxSide = 2400;
@@ -39,8 +55,8 @@ public partial class MainWindow : Window
     // Statistics of the full-resolution image's channels for narrowband normalisation (colour images only).
     private ChannelStatistics? _channelStatistics;
 
-    // Stars-only image added back over the edited image, at full resolution.
-    private RgbImage? _stars;
+    // Stars-only image added back over the edited image, at full and preview resolution.
+    private StarsState? _stars;
 
     private readonly DispatcherTimer _settleTimer;
     private CancellationTokenSource? _fullRenderCancellation;
@@ -49,7 +65,6 @@ public partial class MainWindow : Window
     private bool _fullPending;
     private bool _fullAllowed = true;
     private bool _suppressEditorEvents;
-    private bool _isDirty;
     private bool _overwriteConfirmed;
     private bool _closeConfirmed;
     private bool _dialogOpen;
@@ -70,6 +85,7 @@ public partial class MainWindow : Window
     private Size _restoredSize;
 
     private readonly List<NativeMenuItem> _imageMenuItems = [];
+    private NativeMenuItem? _undoMenuItem, _redoMenuItem, _recentMenuItem; // macOS menu bar only
 
     public MainWindow()
     {
@@ -80,15 +96,21 @@ public partial class MainWindow : Window
         TargetHueSlider.GradientBrush = HueRamp(0, 360);
         GlobalSaturationSlider.GradientBrush = Ramp(Hsl(0, 0, 0.5f), Hsl(0, 1, 0.5f));
         ImageCurves.Curves = _curves;
+        HueCurves.Curves = _hueCurves;
 
         SetShortcutTip(OpenButton, "Open an XISF, FITS, TIFF or camera raw image", "O");
         SetShortcutTip(SaveButton, "Save over the current file", "S");
         SetShortcutTip(SaveAsButton, "Save to a new file", "S", shift: true);
+        SetShortcutTip(UndoButton, "Undo", "Z");
+        SetShortcutTip(RedoButton, "Redo", "Z", shift: true);
         SetShortcutTip(RotateLeftButton, "Rotate 90° anticlockwise", "[");
         SetShortcutTip(RotateRightButton, "Rotate 90° clockwise", "]");
+        ToolTip.SetTip(CropButton, "Crop the image; the astrometric solution is kept (C)");
         SetShortcutTip(FitButton, "Fit the image to the window", "0");
         SetShortcutTip(ActualSizeButton, "View at actual pixels", "1");
         ToolTip.SetTip(CompareButton, "Show the original, unedited image (B)");
+        ToolTip.SetTip(ClippingButton, "Highlight pixels the edits push to black (blue) or white (red) (J)");
+        ToolTip.SetTip(SplitButton, "Show the original and the edited image side by side, split by a draggable divider (Y)");
         ToolTip.SetTip(PickerButton, "Pick a colour from the image (P)");
         if (OperatingSystem.IsMacOS()) BuildMacMenu();
 
@@ -100,8 +122,22 @@ public partial class MainWindow : Window
             if (_fullPending && !_rendering) _ = RenderLoopAsync();
         };
 
+        // The hue histogram follows the edits before the hue curves, at most a few times a second.
+        _hueHistogramTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _hueHistogramTimer.Tick += (_, _) =>
+        {
+            _hueHistogramTimer.Stop();
+            UpdateHueHistogram();
+        };
+
+        Viewer.ScrollChanged += (_, _) => UpdateSplit();
+        Viewer.LayoutUpdated += (_, _) => UpdateSplit();
+
+        UpdateRecentFiles();
         UpdateChrome();
     }
+
+    private bool IsDirty => _image is not null && _history.Current is { } current && current.ContentId != _savedStateId;
 
     /// <summary>A rendered view of the image: its source planes, an 8-bit buffer and the bitmap shown on screen.</summary>
     private sealed class PreviewLayer(RgbImage source)
@@ -110,7 +146,11 @@ public partial class MainWindow : Window
         /// <summary>The stars image at this layer's size, if one is loaded.</summary>
         public RgbImage? Stars { get; set; }
         public byte[] Pixels { get; } = new byte[source.PixelCount * 4];
-        public WriteableBitmap Bitmap { get; } =
+        public WriteableBitmap Bitmap { get; } = NewBitmap(source);
+        /// <summary>The unedited image, for the split view; made when first needed.</summary>
+        public WriteableBitmap? Original { get; set; }
+
+        public static WriteableBitmap NewBitmap(RgbImage source) =>
             new(new PixelSize(source.Width, source.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
     }
 
@@ -155,13 +195,16 @@ public partial class MainWindow : Window
         if (files is [var file] && file.TryGetLocalPath() is { } path) await LoadAsync(path);
     });
 
-    /// <summary>The current file's folder, or the Pictures folder if no file is open.</summary>
+    /// <summary>The current file's folder, else the folder last opened from or saved to, else the Pictures folder.</summary>
     private async Task<IStorageFolder?> StartFolderAsync()
     {
         try
         {
-            if (Path.GetDirectoryName(_path) is { } folder && await StorageProvider.TryGetFolderFromPathAsync(folder) is { } current)
-                return current;
+            foreach (var folder in (string?[])[Path.GetDirectoryName(_path), _settings.LastFolder])
+            {
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) continue;
+                if (await StorageProvider.TryGetFolderFromPathAsync(folder) is { } found) return found;
+            }
             return await StorageProvider.TryGetWellKnownFolderAsync(WellKnownFolder.Pictures);
         }
         catch
@@ -175,30 +218,36 @@ public partial class MainWindow : Window
         SetBusy("Loading image…");
         try
         {
-            var (image, rgb, proxy, factor, median, histogram, clipping, statistics) = await Task.Run(() =>
+            var (image, rgb, proxy, factor, median, histogram, clipping, statistics, hues) = await Task.Run(() =>
             {
                 var img = AstroImageFile.Load(path);
                 var full = RgbImage.From(img);
                 int factor = (int)Math.Ceiling(Math.Max(img.Width, img.Height) / (double)ProxyMaxSide);
                 var small = factor > 1 ? full.Downsample(factor) : null;
                 return (img, full, small, factor, ColourProcessor.EstimateMedian(full), CurveSet.Histogram(small ?? full),
-                    CurveClipping.Sample(small ?? full), img.IsColour ? ChannelStatistics.Measure(full) : null);
+                    CurveClipping.Sample(small ?? full), img.IsColour ? ChannelStatistics.Measure(full) : null,
+                    img.IsColour ? HueCurveSet.Histogram(small ?? full) : null);
             });
 
             _image = image;
             _path = path;
-            _isDirty = false;
             _overwriteConfirmed = false;
             _adjustments.Clear();
             _curves.Reset();
+            _hueCurves.Reset();
             ImageCurves.Histogram = histogram;
             ImageCurves.Clipping = clipping;
             ImageCurves.ShowChannel(CurveChannel.Rgb);
+            HueCurves.Refresh();
+            HueCurves.Histogram = hues;
             _channelStatistics = statistics;
             SetNarrowband(new NarrowbandSettings());
             SetGlobalSaturation(0);
             SetRemovePurple(0);
             SetRotation(Rotation.None);
+            _crop = null;
+            _cropEditing = false;
+            CropButton.IsChecked = false;
             ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
             if (!image.IsColour) EditorTabs.SelectedItem = GlobalTab;
@@ -207,9 +256,16 @@ public partial class MainWindow : Window
             _proxy = proxy is null ? null : new PreviewLayer(proxy);
             _proxyFactor = factor;
             _proxyPending = false;
-            SetStars(null, null, null);
+            SetStars(null);
+            SetStarBrightness(1);
             PreviewImage.Source = _full.Bitmap;
+            BeforeImage.Source = null;
             SetZoom(1 / RenderScaling);
+            _savedStateId = _history.Reset(CaptureState()).ContentId;
+            _settings.AddRecent(path);
+            _settings.Save();
+            UpdateRecentFiles();
+            if (SplitButton.IsChecked == true) _ = ShowSplitAsync();
 
             LinearInfo.IsOpen = image.IsColour && median < 0.03f;
             MessageInfo.IsOpen = false;
@@ -222,6 +278,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (!File.Exists(path))
+            {
+                _settings.RemoveRecent(path);
+                _settings.Save();
+                UpdateRecentFiles();
+            }
             await ShowErrorAsync("Could not open the image", ex.Message);
         }
         finally
@@ -281,15 +343,25 @@ public partial class MainWindow : Window
             var image = _image;
             var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
             var curves = _curves.Clone();
+            var hueCurves = _hueCurves.Clone();
             var saturation = GlobalSaturation;
             var removePurple = RemovePurple;
-            var stars = _stars is null ? null : new StarLayer(_stars, StarBrightness);
+            var stars = _stars is null ? null : new StarLayer(_stars.Full, StarBrightness);
             var rotation = _rotation;
+            var crop = _crop;
             var narrowband = Narrowband;
+            var savedState = _history.Current;
             await Task.Run(() => AstroImageFile.Save(image, target,
-                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband, removePurple), rotation));
+                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband, removePurple, hueCurves), rotation, crop));
             _path = target;
-            _isDirty = false;
+            if (savedState is not null) _savedStateId = savedState.ContentId;
+            // Saved PNG and JPEG files can't be opened again, so only the folder is remembered for those.
+            if (AstroImageFile.AllExtensions.Contains(Path.GetExtension(target), StringComparer.OrdinalIgnoreCase))
+                _settings.AddRecent(target);
+            else
+                _settings.RememberFolder(target);
+            _settings.Save();
+            UpdateRecentFiles();
             UpdateChrome();
             ShowMessage(InfoBarSeverity.Success, "Saved", target);
             return true;
@@ -350,7 +422,7 @@ public partial class MainWindow : Window
     {
         base.OnClosing(e);
         if (e.Cancel) return;
-        if (_closeConfirmed || !_isDirty)
+        if (_closeConfirmed || !IsDirty)
         {
             SavePlacement();
             return;
@@ -367,7 +439,7 @@ public partial class MainWindow : Window
     /// <summary>Asks to save unsaved edits. Returns false if the user cancelled.</summary>
     private async Task<bool> ConfirmDiscardChangesAsync()
     {
-        if (!_isDirty || _path is null) return true;
+        if (!IsDirty || _path is null) return true;
         var choice = await ShowDialogAsync("Save your changes?",
             $"The edits to {Path.GetFileName(_path)} have not been saved.",
             "Save as…", "Don't save", "Cancel", DialogResult.Primary);
@@ -430,6 +502,7 @@ public partial class MainWindow : Window
 
                 var snapshot = _adjustments.Select(a => a.Model.Clone()).ToArray();
                 var curves = _curves.Clone();
+                var hueCurves = _hueCurves.Clone();
                 var saturation = GlobalSaturation;
                 var removePurple = RemovePurple;
                 var narrowband = Narrowband;
@@ -439,11 +512,15 @@ public partial class MainWindow : Window
                     : ShowMaskToggle.IsChecked == true && mask is not null && ColourTab.IsSelected ? PreviewMode.Mask
                     : PreviewMode.Adjusted;
 
+                bool showClipping = ClippingButton.IsChecked == true;
+
                 var cancellation = new CancellationTokenSource();
                 if (layer == full) _fullRenderCancellation = cancellation;
+                ClippingStats clipped;
                 try
                 {
-                    await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels, cancellation.Token, stars, saturation, narrowband, removePurple));
+                    clipped = await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels,
+                        cancellation.Token, stars, saturation, narrowband, removePurple, hueCurves, showClipping));
                 }
                 catch (OperationCanceledException)
                 {
@@ -457,6 +534,7 @@ public partial class MainWindow : Window
                 }
 
                 if (full != _full) continue; // a different file was opened meanwhile
+                ShowClippingInfo(showClipping && mode == PreviewMode.Adjusted ? clipped : null);
                 CopyToBitmap(layer);
                 if (PreviewImage.Source != layer.Bitmap) PreviewImage.Source = layer.Bitmap;
                 PreviewImage.InvalidateVisual();
@@ -472,20 +550,229 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void CopyToBitmap(PreviewLayer layer)
+    private static void CopyToBitmap(PreviewLayer layer) => CopyToBitmap(layer.Pixels, layer.Bitmap, layer.Source);
+
+    private static void CopyToBitmap(byte[] pixels, WriteableBitmap bitmap, RgbImage source)
     {
-        using var buffer = layer.Bitmap.Lock();
-        int rowBytes = layer.Source.Width * 4;
+        using var buffer = bitmap.Lock();
+        int rowBytes = source.Width * 4;
         if (buffer.RowBytes == rowBytes)
         {
-            Marshal.Copy(layer.Pixels, 0, buffer.Address, layer.Pixels.Length);
+            Marshal.Copy(pixels, 0, buffer.Address, pixels.Length);
             return;
         }
-        for (int y = 0; y < layer.Source.Height; y++)
-            Marshal.Copy(layer.Pixels, y * rowBytes, buffer.Address + y * buffer.RowBytes, rowBytes);
+        for (int y = 0; y < source.Height; y++)
+            Marshal.Copy(pixels, y * rowBytes, buffer.Address + y * buffer.RowBytes, rowBytes);
     }
 
-    private void Compare_Click(object? sender, RoutedEventArgs e) => RequestRender();
+    private void Compare_Click(object? sender, RoutedEventArgs e)
+    {
+        // Showing the whole original and the split view are alternatives.
+        if (CompareButton.IsChecked == true && SplitButton.IsChecked == true)
+        {
+            SplitButton.IsChecked = false;
+            HideSplit();
+        }
+        RequestRender();
+    }
+
+    // -------------------------------------------------------------- clipping
+
+    private void Clipping_Click(object? sender, RoutedEventArgs e) => RequestRender();
+
+    private void ToggleClipping()
+    {
+        ClippingButton.IsChecked = ClippingButton.IsChecked != true;
+        RequestRender();
+    }
+
+    /// <summary>Shows the shares of pixels clipped by the edits in the status bar, or hides them if null.</summary>
+    private void ShowClippingInfo(ClippingStats? clipped)
+    {
+        ClippingInfoText.IsVisible = clipped is not null;
+        if (clipped is not { } c) return;
+        ClippingInfoText.Text = $"Clipped:  shadows {Percent(c.Shadows)}   highlights {Percent(c.Highlights)}";
+
+        static string Percent(double fraction) =>
+            fraction <= 0 ? "0%" : fraction < 0.0001 ? "<0.01%" : $"{fraction * 100:0.##}%";
+    }
+
+    // ------------------------------------------------------------------ crop
+
+    private void Crop_Click(object? sender, RoutedEventArgs e) => SetCropEditing(CropButton.IsChecked == true);
+
+    private void CropDone_Click(object? sender, RoutedEventArgs e) => SetCropEditing(false);
+
+    /// <summary>Starts or finishes cropping, fitting the whole image (to crop) or the cropped part (when done) to the window.</summary>
+    private void SetCropEditing(bool editing)
+    {
+        if (_image is null) editing = false;
+        CropButton.IsChecked = editing;
+        if (editing == _cropEditing) return;
+        _cropEditing = editing;
+        if (editing && PickerButton.IsChecked == true)
+        {
+            PickerButton.IsChecked = false;
+            UpdateCursor();
+        }
+        UpdateCropOverlay();
+        FitToWindow();
+    }
+
+    /// <summary>Shows the crop over the image: editable while cropping, otherwise hiding what is cropped away.</summary>
+    private void UpdateCropOverlay()
+    {
+        if (_image is null)
+        {
+            CropOverlay.IsVisible = CropBar.IsVisible = false;
+            return;
+        }
+        var (width, height) = _rotation.Size(_image.Width, _image.Height);
+        var shown = _crop?.Rotate(_rotation, _image.Width, _image.Height) ?? new CropRect(0, 0, width, height);
+        CropOverlay.ImageSize = new Size(width, height);
+        CropOverlay.Zoom = _zoom;
+        CropOverlay.Selection = new Rect(shown.X, shown.Y, shown.Width, shown.Height);
+        CropOverlay.IsEditing = _cropEditing;
+        CropOverlay.IsVisible = _cropEditing || _crop is not null;
+        CropBar.IsVisible = _cropEditing;
+        CropSizeText.Text = $"{shown.Width} × {shown.Height} px";
+    }
+
+    private void CropOverlay_SelectionChanged(object? sender, bool interactive)
+    {
+        if (_image is null) return;
+        var (width, height) = _rotation.Size(_image.Width, _image.Height);
+        var r = CropOverlay.Selection;
+        int left = Math.Clamp((int)Math.Round(r.Left), 0, width - 1), top = Math.Clamp((int)Math.Round(r.Top), 0, height - 1);
+        int right = Math.Clamp((int)Math.Round(r.Right), left + 1, width), bottom = Math.Clamp((int)Math.Round(r.Bottom), top + 1, height);
+        var shown = new CropRect(left, top, right - left, bottom - top);
+        CropSizeText.Text = $"{shown.Width} × {shown.Height} px";
+
+        var crop = shown.IsWhole(width, height) ? (CropRect?)null : shown.Unrotate(_rotation, _image.Width, _image.Height);
+        if (crop == _crop && interactive) return;
+        _crop = crop;
+        RecordEdit(CropOverlay, sealStep: !interactive);
+        if (!interactive) UpdateCropOverlay(); // snap the rectangle to whole pixels
+    }
+
+    private void CropAspect_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_image is null) return;
+        var (width, height) = _rotation.Size(_image.Width, _image.Height);
+        CropOverlay.AspectRatio = CropAspectBox.SelectedIndex switch
+        {
+            1 => width / (double)height,
+            2 => 1,
+            3 => 5 / 4.0,
+            4 => 4 / 5.0,
+            5 => 4 / 3.0,
+            6 => 3 / 4.0,
+            7 => 3 / 2.0,
+            8 => 2 / 3.0,
+            9 => 16 / 9.0,
+            10 => 9 / 16.0,
+            _ => null,
+        };
+        if (_cropEditing) CropOverlay.ApplyAspectRatio();
+    }
+
+    private void CropReset_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_crop is null) return;
+        _crop = null;
+        RecordEdit();
+        UpdateCropOverlay();
+    }
+
+    // ------------------------------------------------------------ split view
+
+    private void Split_Click(object? sender, RoutedEventArgs e)
+    {
+        if (SplitButton.IsChecked == true)
+        {
+            if (CompareButton.IsChecked == true)
+            {
+                CompareButton.IsChecked = false;
+                RequestRender();
+            }
+            _ = ShowSplitAsync();
+        }
+        else
+        {
+            HideSplit();
+        }
+    }
+
+    private void ToggleSplit()
+    {
+        SplitButton.IsChecked = SplitButton.IsChecked != true;
+        Split_Click(SplitButton, new RoutedEventArgs());
+    }
+
+    /// <summary>Shows the unedited image left of the divider, rendering it at full resolution the first time.</summary>
+    private async Task ShowSplitAsync()
+    {
+        if (_full is not { } full) return;
+        if (full.Original is null)
+        {
+            var pixels = new byte[full.Source.PixelCount * 4];
+            await Task.Run(() => ColourProcessor.RenderPreview(full.Source, [], null, PreviewMode.Original, null, pixels));
+            if (full != _full) return; // a different file was opened meanwhile
+            var bitmap = PreviewLayer.NewBitmap(full.Source);
+            CopyToBitmap(pixels, bitmap, full.Source);
+            full.Original = bitmap;
+        }
+        if (SplitButton.IsChecked != true) return;
+        BeforeImage.Source = full.Original;
+        BeforeRotator.IsVisible = SplitOverlay.IsVisible = true;
+        UpdateSplit();
+    }
+
+    private void HideSplit()
+    {
+        BeforeRotator.IsVisible = SplitOverlay.IsVisible = false;
+        _splitDragging = false;
+    }
+
+    /// <summary>Places the divider and clips the unedited image to its left, after a scroll, zoom, resize or drag.</summary>
+    private void UpdateSplit()
+    {
+        if (!SplitOverlay.IsVisible) return;
+        var viewport = Viewer.Viewport;
+        double x = Math.Round(viewport.Width * _splitFraction);
+        double left = x - SplitDivider.Width / 2;
+        if (Canvas.GetLeft(SplitDivider) != left) Canvas.SetLeft(SplitDivider, left);
+        if (SplitDivider.Height != viewport.Height) SplitDivider.Height = viewport.Height;
+
+        // The divider is fixed in the viewport, so find where it falls on the (possibly rotated) image.
+        if (Viewer.TranslatePoint(new Point(x, 0), BeforeRotator) is not { } local) return;
+        var clip = new Rect(0, 0, Math.Clamp(local.X, 0, BeforeRotator.Bounds.Width), BeforeRotator.Bounds.Height);
+        if (BeforeRotator.Clip is RectangleGeometry { Rect: var current } && current == clip) return;
+        BeforeRotator.Clip = new RectangleGeometry(clip);
+    }
+
+    private void SplitHandle_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(SplitHandle).Properties.IsLeftButtonPressed) return;
+        _splitDragging = true;
+        e.Pointer.Capture(SplitHandle);
+        e.Handled = true;
+    }
+
+    private void SplitHandle_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_splitDragging || Viewer.Viewport.Width <= 0) return;
+        _splitFraction = Math.Clamp(e.GetPosition(Viewer).X / Viewer.Viewport.Width, 0, 1);
+        UpdateSplit();
+        e.Handled = true;
+    }
+
+    private void SplitHandle_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _splitDragging = false;
+        e.Pointer.Capture(null);
+        e.Handled = true;
+    }
 
     private void ShowMaskToggle_Toggled(object? sender, RoutedEventArgs e) => RequestRender();
 
@@ -504,7 +791,11 @@ public partial class MainWindow : Window
 
     // ---------------------------------------------------------- colour editor
 
-    private void Picker_Click(object? sender, RoutedEventArgs e) => UpdateCursor();
+    private void Picker_Click(object? sender, RoutedEventArgs e)
+    {
+        if (PickerButton.IsChecked == true) SetCropEditing(false);
+        UpdateCursor();
+    }
 
     private void PickColour(Point imagePoint)
     {
@@ -527,8 +818,7 @@ public partial class MainWindow : Window
         var item = Selected;
         if (item is null || item.Model.HasEdits)
         {
-            item = new AdjustmentItem(new ColourAdjustment()) { EditWithCurves = _preferColourCurves };
-            item.ActiveChanged += (_, _) => { MarkDirty(); RequestRender(); };
+            item = CreateItem(new ColourAdjustment(), _preferColourCurves);
             _adjustments.Add(item);
         }
         item.Model.TargetHue = hue;
@@ -541,7 +831,20 @@ public partial class MainWindow : Window
         LoadEditor(item);
         PickerButton.IsChecked = false;
         UpdateCursor();
+        RecordEdit(changesImage: false); // an unadjusted colour changes nothing yet
         RequestRender();
+    }
+
+    private AdjustmentItem CreateItem(ColourAdjustment model, bool editWithCurves)
+    {
+        var item = new AdjustmentItem(model) { EditWithCurves = editWithCurves };
+        item.ActiveChanged += (_, _) =>
+        {
+            if (_restoring) return;
+            RecordEdit(changesImage: item.Model.HasEdits);
+            RequestRender();
+        };
+        return item;
     }
 
     private void AdjustmentList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -568,6 +871,8 @@ public partial class MainWindow : Window
         SaturationSlider.Value = m.Saturation;
         LightnessSlider.Value = m.Lightness;
         TargetHueSlider.DefaultValue = Math.Round(ColourMath.Hue(m.SampleR, m.SampleG, m.SampleB)) % 360;
+        LimitByLightnessButton.IsChecked = m.LimitBy == BrightnessMeasure.Lightness;
+        LimitByLuminanceButton.IsChecked = m.LimitBy == BrightnessMeasure.Luminance;
         _suppressEditorEvents = false;
         UpdateSliderRamps();
 
@@ -603,8 +908,21 @@ public partial class MainWindow : Window
     private void ColourCurves_CurvesChanged(object? sender, bool interactive)
     {
         Selected?.Refresh();
-        MarkDirty();
+        RecordEdit((ColourCurves, Selected), sealStep: !interactive);
         RequestRender(interactive);
+    }
+
+    private void LimitBy_Click(object? sender, RoutedEventArgs e)
+    {
+        var measure = sender == LimitByLuminanceButton ? BrightnessMeasure.Luminance : BrightnessMeasure.Lightness;
+        LimitByLightnessButton.IsChecked = measure == BrightnessMeasure.Lightness;
+        LimitByLuminanceButton.IsChecked = measure == BrightnessMeasure.Luminance;
+        if (Selected is not { } item || item.Model.LimitBy == measure) return;
+        item.Model.LimitBy = measure;
+        UpdateSliderRamps();
+        UpdateSelectionHistogram();
+        RecordEdit(changesImage: item.Model.HasEdits && item.Model.Enabled);
+        RequestRender();
     }
 
     private void EditorSlider_ValueChanged(object? sender, EventArgs e)
@@ -620,6 +938,7 @@ public partial class MainWindow : Window
         _suppressEditorEvents = false;
 
         var m = item.Model;
+        bool hadEdits = m.HasEdits;
         m.TargetHue = (float)TargetHueSlider.Value;
         m.Range = (float)RangeSlider.Value;
         m.Smoothness = (float)SmoothnessSlider.Value;
@@ -634,17 +953,17 @@ public partial class MainWindow : Window
 
         if (ReferenceEquals(sender, TargetHueSlider)) UpdateSliderRamps();
         if (!HslEditor.IsVisible) UpdateSelectionHistogram();
-        MarkDirty();
+        RecordEdit((sender, item), changesImage: (hadEdits || m.HasEdits) && m.Enabled);
         RequestRender(interactive: true);
     }
 
     private void ResetAdjustment_Click(object? sender, RoutedEventArgs e)
     {
-        if (Selected is not { } item) return;
+        if (Selected is not { } item || !item.Model.HasHslEdits) return;
         item.Model.ResetHsl();
         item.Refresh();
         LoadEditor(item);
-        MarkDirty();
+        RecordEdit();
         RequestRender();
     }
 
@@ -655,7 +974,7 @@ public partial class MainWindow : Window
         _adjustments.Remove(item);
         if (_adjustments.Count > 0)
             AdjustmentList.SelectedIndex = Math.Min(index, _adjustments.Count - 1);
-        if (item.Model.HasEdits) MarkDirty();
+        RecordEdit(changesImage: item.Model.HasEdits && item.Model.Enabled);
         RequestRender();
     }
 
@@ -665,8 +984,10 @@ public partial class MainWindow : Window
         HueShiftSlider.GradientBrush = HueRamp(h - 90, h + 90);
         SaturationSlider.GradientBrush = Ramp(Hsl(h, 0, 0.5f), Hsl(h, 1, 0.5f));
         LightnessSlider.GradientBrush = Ramp(Hsl(h, 0.8f, 0.1f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 0.9f));
-        LightnessMinSlider.GradientBrush = LightnessMaxSlider.GradientBrush =
-            Ramp(Hsl(h, 0.8f, 0f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 1f));
+        // Luminance is how bright a colour looks, so its ramp is grey.
+        LightnessMinSlider.GradientBrush = LightnessMaxSlider.GradientBrush = LimitByLuminanceButton.IsChecked == true
+            ? Ramp(Colors.Black, Colors.White)
+            : Ramp(Hsl(h, 0.8f, 0f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 1f));
     }
 
     private static LinearGradientBrush HueRamp(float from, float to)
@@ -702,9 +1023,31 @@ public partial class MainWindow : Window
 
     private void ImageCurves_CurvesChanged(object? sender, bool interactive)
     {
-        MarkDirty();
+        RecordEdit(ImageCurves, sealStep: !interactive);
+        UpdateSelectionHistogram();
+        QueueHueHistogram();
+        RequestRender(interactive);
+    }
+
+    private void HueCurves_CurvesChanged(object? sender, bool interactive)
+    {
+        RecordEdit(HueCurves, sealStep: !interactive);
         UpdateSelectionHistogram();
         RequestRender(interactive);
+    }
+
+    private void QueueHueHistogram()
+    {
+        _hueHistogramTimer.Stop();
+        _hueHistogramTimer.Start();
+    }
+
+    /// <summary>Shows the hues of the image as the hue curves see it, behind them.</summary>
+    private void UpdateHueHistogram()
+    {
+        if ((_proxy ?? _full) is not { } layer || _image is not { IsColour: true }) return;
+        HueCurves.Histogram = HueCurveSet.Histogram(layer.Source, baseAdjustments:
+            Core.Colour.BaseAdjustments.Create(Narrowband, new CurveLookup(_curves), GlobalSaturation, RemovePurple));
     }
 
     private float GlobalSaturation => (float)GlobalSaturationSlider.Value;
@@ -718,9 +1061,10 @@ public partial class MainWindow : Window
 
     private void GlobalSaturationSlider_ValueChanged(object? sender, EventArgs e)
     {
-        if (_suppressEditorEvents) return;
-        MarkDirty();
+        if (_suppressEditorEvents || _restoring) return;
+        RecordEdit(sender);
         UpdateSelectionHistogram();
+        QueueHueHistogram();
         RequestRender(interactive: true);
     }
 
@@ -735,7 +1079,8 @@ public partial class MainWindow : Window
 
     /// <summary>The changes made before the colour editor, or null when there are none.</summary>
     private BaseAdjustments? BaseAdjustments =>
-        Core.Colour.BaseAdjustments.Create(Narrowband, new CurveLookup(_curves), GlobalSaturation, RemovePurple);
+        Core.Colour.BaseAdjustments.Create(Narrowband, new CurveLookup(_curves), GlobalSaturation, RemovePurple,
+            new HueCurveLookup(_hueCurves));
 
     // ------------------------------------------------------------ narrowband
 
@@ -763,11 +1108,19 @@ public partial class MainWindow : Window
         _narrowband = settings;
     }
 
-    private void ChangeNarrowband(NarrowbandSettings settings, bool interactive)
+    private void ChangeNarrowband(NarrowbandSettings settings, bool interactive, object? mergeKey = null)
     {
+        bool changed = settings != _narrowband;
         SetNarrowband(settings);
-        MarkDirty();
-        // The Global curves act on the normalised image; the colour editor sees everything before it.
+        if (!changed) return;
+        RecordEdit(mergeKey);
+        UpdateNarrowbandHistograms();
+        RequestRender(interactive);
+    }
+
+    /// <summary>The Global curves act on the normalised image, and everything after them sees it too.</summary>
+    private void UpdateNarrowbandHistograms()
+    {
         if ((_proxy ?? _full) is { } layer)
         {
             var narrowband = Core.Colour.BaseAdjustments.Create(Narrowband);
@@ -775,7 +1128,7 @@ public partial class MainWindow : Window
             ImageCurves.Clipping = CurveClipping.Sample(layer.Source, narrowband);
         }
         UpdateSelectionHistogram();
-        RequestRender(interactive);
+        QueueHueHistogram();
     }
 
     private void NarrowbandPalette_Click(object? sender, RoutedEventArgs e)
@@ -796,13 +1149,13 @@ public partial class MainWindow : Window
 
     private void NarrowbandSlider_ValueChanged(object? sender, EventArgs e)
     {
-        if (_suppressEditorEvents) return;
+        if (_suppressEditorEvents || _restoring) return;
         ChangeNarrowband(_narrowband with
         {
             SiiBoost = (float)SiiBoostSlider.Value,
             OiiiBoost = (float)OiiiBoostSlider.Value,
             GreenReduction = (float)GreenReductionSlider.Value / 100f,
-        }, interactive: true);
+        }, interactive: true, mergeKey: sender);
     }
 
     // ----------------------------------------------------------------- stars
@@ -836,8 +1189,10 @@ public partial class MainWindow : Window
                 return (rgb, factor > 1 ? rgb.Downsample(factor) : null);
             });
             if (image != _image) return; // a different file was opened meanwhile
-            SetStars(full, proxy, path);
-            MarkDirty();
+            SetStars(new StarsState(full, proxy, path));
+            _settings.RememberFolder(path);
+            _settings.Save();
+            RecordEdit();
             RequestRender();
         }
         catch (Exception ex)
@@ -853,26 +1208,34 @@ public partial class MainWindow : Window
     private void RemoveStars_Click(object? sender, RoutedEventArgs e)
     {
         if (_stars is null) return;
-        SetStars(null, null, null);
-        MarkDirty();
+        SetStars(null);
+        RecordEdit();
         RequestRender();
     }
 
-    private void SetStars(RgbImage? full, RgbImage? proxy, string? path)
+    private void SetStars(StarsState? stars)
     {
-        _stars = full;
-        if (_full is not null) _full.Stars = full;
-        if (_proxy is not null) _proxy.Stars = proxy;
-        StarsEditor.IsVisible = full is not null;
-        StarsFileText.Text = path is null ? "" : Path.GetFileName(path);
-        ToolTip.SetTip(StarsFileText, path);
-        LoadStarsText.Text = full is null ? "Add stars image…" : "Replace stars image…";
+        _stars = stars;
+        if (_full is not null) _full.Stars = stars?.Full;
+        if (_proxy is not null) _proxy.Stars = stars?.Proxy;
+        StarsEditor.IsVisible = stars is not null;
+        StarsFileText.Text = stars is null ? "" : Path.GetFileName(stars.Path);
+        ToolTip.SetTip(StarsFileText, stars?.Path);
+        LoadStarsText.Text = stars is null ? "Add stars image…" : "Replace stars image…";
+    }
+
+    private void SetStarBrightness(double value)
+    {
+        _suppressEditorEvents = true;
+        StarBrightnessSlider.Value = value;
+        _suppressEditorEvents = false;
     }
 
     private void StarBrightnessSlider_ValueChanged(object? sender, EventArgs e)
     {
-        if (_stars is null) return;
-        MarkDirty();
+        if (_suppressEditorEvents || _restoring) return;
+        // Without stars the brightness changes nothing yet, but it is kept for when they are added.
+        RecordEdit(sender, changesImage: _stars is not null);
         RequestRender(interactive: true);
     }
 
@@ -891,7 +1254,7 @@ public partial class MainWindow : Window
         var anchor = Viewer.TranslatePoint(centre, PreviewImage);
 
         SetRotation(_rotation.Turn(quarterTurns));
-        MarkDirty();
+        RecordEdit();
 
         if (fitted)
         {
@@ -907,6 +1270,8 @@ public partial class MainWindow : Window
     {
         _rotation = rotation;
         ImageRotator.LayoutTransform = rotation == Rotation.None ? null : new RotateTransform(rotation.Degrees());
+        BeforeRotator.LayoutTransform = rotation == Rotation.None ? null : new RotateTransform(rotation.Degrees());
+        UpdateCropOverlay();
     }
 
     // ------------------------------------------------------------ navigation
@@ -926,14 +1291,28 @@ public partial class MainWindow : Window
         if (_image is null || Viewer.Bounds.Width <= 0) return;
         SetZoom(FitZoom(Viewer.Bounds.Size));
         Viewer.UpdateLayout();
-        Viewer.Offset = default;
+        if (VisibleArea is { } area)
+        {
+            // Centre the cropped area; the image around it is hidden.
+            var viewport = Viewer.Viewport;
+            Viewer.Offset = new Vector((area.X + area.Width / 2.0) * _zoom - viewport.Width / 2,
+                (area.Y + area.Height / 2.0) * _zoom - viewport.Height / 2);
+        }
+        else
+        {
+            Viewer.Offset = default;
+        }
     }
 
-    /// <summary>The zoom that shows the whole image in a viewport of the given size.</summary>
+    /// <summary>The crop as displayed, unless the whole image is shown (no crop, or while cropping).</summary>
+    private CropRect? VisibleArea =>
+        _image is not null && !_cropEditing && _crop is { } c ? c.Rotate(_rotation, _image.Width, _image.Height) : null;
+
+    /// <summary>The zoom that shows the whole image, or the cropped part of it, in a viewport of the given size.</summary>
     private double FitZoom(Size viewport)
     {
         if (_image is null) return 1;
-        var (width, height) = _rotation.Size(_image.Width, _image.Height);
+        var (width, height) = VisibleArea is { } area ? (area.Width, area.Height) : _rotation.Size(_image.Width, _image.Height);
         return Math.Min(viewport.Width / width, viewport.Height / height) * 0.98;
     }
 
@@ -941,11 +1320,13 @@ public partial class MainWindow : Window
     {
         if (_image is null) return;
         _zoom = Math.Clamp(zoom, MinZoom / RenderScaling, MaxZoom / RenderScaling);
-        PreviewImage.Width = _image.Width * _zoom;
-        PreviewImage.Height = _image.Height * _zoom;
+        PreviewImage.Width = BeforeImage.Width = _image.Width * _zoom;
+        PreviewImage.Height = BeforeImage.Height = _image.Height * _zoom;
         // Smooth when zoomed out; sharp pixels when zoomed well in.
-        RenderOptions.SetBitmapInterpolationMode(PreviewImage,
-            _zoom * RenderScaling >= 2 ? BitmapInterpolationMode.None : BitmapInterpolationMode.HighQuality);
+        var interpolation = _zoom * RenderScaling >= 2 ? BitmapInterpolationMode.None : BitmapInterpolationMode.HighQuality;
+        RenderOptions.SetBitmapInterpolationMode(PreviewImage, interpolation);
+        RenderOptions.SetBitmapInterpolationMode(BeforeImage, interpolation);
+        CropOverlay.Zoom = _zoom;
         UpdateZoomText();
     }
 
@@ -1048,6 +1429,18 @@ public partial class MainWindow : Window
                 case Key.B when CompareButton.IsEnabled:
                     ToggleCompare();
                     break;
+                case Key.Y when SplitButton.IsEnabled:
+                    ToggleSplit();
+                    break;
+                case Key.J when ClippingButton.IsEnabled:
+                    ToggleClipping();
+                    break;
+                case Key.C when CropButton.IsEnabled:
+                    SetCropEditing(!_cropEditing);
+                    break;
+                case Key.Enter or Key.Escape when _cropEditing:
+                    SetCropEditing(false);
+                    break;
                 case Key.P when ColourPanel.IsEnabled:
                     TogglePicker();
                     break;
@@ -1082,6 +1475,13 @@ public partial class MainWindow : Window
             case Key.OemCloseBrackets when !shift:
                 Rotate(1);
                 break;
+            case Key.Z:
+                if (shift) Redo();
+                else Undo();
+                break;
+            case Key.Y when !shift:
+                Redo();
+                break;
             default:
                 return;
         }
@@ -1091,13 +1491,14 @@ public partial class MainWindow : Window
     private void ToggleCompare()
     {
         CompareButton.IsChecked = CompareButton.IsChecked != true;
-        RequestRender();
+        Compare_Click(CompareButton, new RoutedEventArgs());
     }
 
     private void TogglePicker()
     {
         EditorTabs.SelectedItem = ColourTab;
         PickerButton.IsChecked = PickerButton.IsChecked != true;
+        if (PickerButton.IsChecked == true) SetCropEditing(false);
         UpdateCursor();
     }
 
@@ -1121,6 +1522,9 @@ public partial class MainWindow : Window
             return item;
         }
 
+        _undoMenuItem = Item("Undo", "Meta+Z", Undo);
+        _redoMenuItem = Item("Redo", "Meta+Shift+Z", Redo);
+        _recentMenuItem = new NativeMenuItem("Open Recent") { Menu = new NativeMenu() };
         var menu = new NativeMenu
         {
             new NativeMenuItem("File")
@@ -1128,10 +1532,15 @@ public partial class MainWindow : Window
                 Menu = new NativeMenu
                 {
                     Item("Open…", "Meta+O", () => _ = OpenAsync(), needsImage: false),
+                    _recentMenuItem,
                     new NativeMenuItemSeparator(),
                     Item("Save", "Meta+S", () => _ = RunFileActionAsync(() => SaveAsync(saveAs: false))),
                     Item("Save As…", "Meta+Shift+S", () => _ = RunFileActionAsync(() => SaveAsync(saveAs: true))),
                 },
+            },
+            new NativeMenuItem("Edit")
+            {
+                Menu = new NativeMenu { _undoMenuItem, _redoMenuItem },
             },
             new NativeMenuItem("View")
             {
@@ -1144,6 +1553,9 @@ public partial class MainWindow : Window
                     Item("Rotate Right", "Meta+OemCloseBrackets", () => Rotate(1)),
                     new NativeMenuItemSeparator(),
                     Item("Show Original (B)", null, ToggleCompare),
+                    Item("Split Before and After (Y)", null, ToggleSplit),
+                    Item("Show Clipping (J)", null, ToggleClipping),
+                    Item("Crop (C)", null, () => SetCropEditing(!_cropEditing)),
                     Item("Pick Colour (P)", null, () => { if (ColourPanel.IsEnabled) TogglePicker(); }),
                 },
             },
@@ -1172,11 +1584,167 @@ public partial class MainWindow : Window
 
     private void UpdateZoomText() => ZoomText.Text = _image is null ? "" : $"{_zoom * RenderScaling:0%}";
 
-    private void MarkDirty()
+    // ------------------------------------------------------------ undo/redo
+
+    /// <summary>
+    /// Records the edits as they now are as one undo step. Changes with the same <paramref name="mergeKey"/> in quick
+    /// succession (a slider or curve point being dragged) make one step; <paramref name="sealStep"/> ends such a run.
+    /// </summary>
+    /// <param name="changesImage">False for an edit that leaves the image as it was, so it doesn't count as unsaved.</param>
+    private void RecordEdit(object? mergeKey = null, bool changesImage = true, bool sealStep = false)
     {
-        if (_isDirty) return;
-        _isDirty = true;
+        if (_restoring || _image is null) return;
+        _history.Record(CaptureState(), mergeKey, changesImage);
+        if (sealStep) _history.Seal();
         UpdateChrome();
+    }
+
+    private EditState CaptureState() => new(
+        [.. _adjustments.Select(a => new AdjustmentState(a.Model.Clone(), a.EditWithCurves))],
+        AdjustmentList.SelectedIndex,
+        _curves.Clone(),
+        _hueCurves.Clone(),
+        GlobalSaturation,
+        RemovePurple,
+        _narrowband,
+        _stars,
+        StarBrightness,
+        _rotation,
+        _crop);
+
+    private void Undo_Click(object? sender, RoutedEventArgs e) => Undo();
+
+    private void Redo_Click(object? sender, RoutedEventArgs e) => Redo();
+
+    private void Undo()
+    {
+        if (_image is not null && _history.Undo() is { } state) Restore(state);
+    }
+
+    private void Redo()
+    {
+        if (_image is not null && _history.Redo() is { } state) Restore(state);
+    }
+
+    /// <summary>Puts every edit and its controls back as they were in <paramref name="state"/>.</summary>
+    private void Restore(EditState state)
+    {
+        _restoring = true;
+        try
+        {
+            bool narrowbandChanged = state.Narrowband != _narrowband;
+            bool rotationChanged = state.Rotation != _rotation || state.Crop != _crop;
+            bool fitted = Math.Abs(_zoom / FitZoom(Viewer.Bounds.Size) - 1) < 0.002;
+
+            _adjustments.Clear();
+            foreach (var a in state.Adjustments) _adjustments.Add(CreateItem(a.Model.Clone(), a.EditWithCurves));
+            _curves.CopyFrom(state.Curves);
+            ImageCurves.Curves = _curves;
+            _hueCurves.CopyFrom(state.HueCurves);
+            HueCurves.Refresh();
+            SetGlobalSaturation(state.Saturation);
+            SetRemovePurple(state.RemovePurple);
+            SetNarrowband(state.Narrowband);
+            SetStars(state.Stars);
+            SetStarBrightness(state.StarBrightness);
+            _crop = state.Crop;
+            SetRotation(state.Rotation);
+
+            int index = Math.Min(state.SelectedIndex, _adjustments.Count - 1);
+            AdjustmentList.SelectedIndex = index;
+            LoadEditor(Selected);
+
+            if (narrowbandChanged) UpdateNarrowbandHistograms();
+            else
+            {
+                UpdateSelectionHistogram();
+                QueueHueHistogram();
+            }
+            if (rotationChanged && fitted) Dispatcher.UIThread.Post(FitToWindow, DispatcherPriority.Background);
+        }
+        finally
+        {
+            _restoring = false;
+        }
+        RequestRender();
+        UpdateChrome();
+    }
+
+    // ---------------------------------------------------------- recent files
+
+    /// <summary>Rebuilds the recent files menu under the arrow beside Open.</summary>
+    private void BuildRecentFlyout()
+    {
+        var flyout = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+        foreach (var path in _settings.RecentFiles)
+        {
+            var item = new MenuItem { Header = Path.GetFileName(path) };
+            ToolTip.SetTip(item, path);
+            item.Click += (_, _) => OpenRecent(path);
+            flyout.Items.Add(item);
+        }
+        if (_settings.RecentFiles.Count == 0)
+            flyout.Items.Add(new MenuItem { Header = "No recent files", IsEnabled = false });
+        else
+        {
+            flyout.Items.Add(new Separator());
+            var clear = new MenuItem { Header = "Clear recent files" };
+            clear.Click += (_, _) => ClearRecentFiles();
+            flyout.Items.Add(clear);
+        }
+        RecentButton.Flyout = flyout;
+    }
+
+    private void OpenRecent(string path) => _ = RunFileActionAsync(async () =>
+    {
+        if (await ConfirmDiscardChangesAsync()) await LoadAsync(path);
+    });
+
+    private void ClearRecentFiles()
+    {
+        _settings.RecentFiles.Clear();
+        _settings.Save();
+        UpdateRecentFiles();
+    }
+
+    /// <summary>Lists the recent files on the start screen and in the macOS File menu.</summary>
+    private void UpdateRecentFiles()
+    {
+        var recent = _settings.RecentFiles;
+        BuildRecentFlyout();
+        EmptyRecent.IsVisible = recent.Count > 0;
+        EmptyRecentList.Children.Clear();
+        foreach (var path in recent.Take(5))
+        {
+            var link = new HyperlinkButton
+            {
+                Content = new TextBlock { Text = Path.GetFileName(path), TextTrimming = TextTrimming.CharacterEllipsis },
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                Padding = new Thickness(6, 2),
+            };
+            ToolTip.SetTip(link, path);
+            link.Click += (_, _) => OpenRecent(path);
+            EmptyRecentList.Children.Add(link);
+        }
+
+        if (_recentMenuItem?.Menu is { } menu)
+        {
+            menu.Items.Clear();
+            foreach (var path in recent)
+            {
+                var item = new NativeMenuItem(Path.GetFileName(path)) { ToolTip = path };
+                item.Click += (_, _) => { if (Toolbar.IsEnabled) OpenRecent(path); };
+                menu.Items.Add(item);
+            }
+            if (recent.Count > 0)
+            {
+                menu.Items.Add(new NativeMenuItemSeparator());
+                var clear = new NativeMenuItem("Clear Menu");
+                clear.Click += (_, _) => ClearRecentFiles();
+                menu.Items.Add(clear);
+            }
+            _recentMenuItem.IsEnabled = recent.Count > 0;
+        }
     }
 
     private void UpdateChrome()
@@ -1187,16 +1755,21 @@ public partial class MainWindow : Window
         GlobalPanel.IsEnabled = loaded;
         StarsPanel.IsEnabled = loaded;
         // A single-channel image only has the composite curve, and no saturation to change.
-        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = RemovePurpleSlider.IsEnabled = NarrowbandSection.IsEnabled = loaded && _image!.IsColour;
+        ImageCurves.ChannelsEnabled = GlobalSaturationSlider.IsEnabled = RemovePurpleSlider.IsEnabled =
+            NarrowbandSection.IsEnabled = HueCurvesSection.IsEnabled = loaded && _image!.IsColour;
         SaveButton.IsEnabled = SaveAsButton.IsEnabled = FitButton.IsEnabled =
             RotateLeftButton.IsEnabled = RotateRightButton.IsEnabled =
-            ActualSizeButton.IsEnabled = CompareButton.IsEnabled = loaded;
+            ActualSizeButton.IsEnabled = CompareButton.IsEnabled = SplitButton.IsEnabled = ClippingButton.IsEnabled = CropButton.IsEnabled = loaded;
         foreach (var item in _imageMenuItems) item.IsEnabled = loaded;
+        UndoButton.IsEnabled = loaded && _history.CanUndo;
+        RedoButton.IsEnabled = loaded && _history.CanRedo;
+        if (_undoMenuItem is not null) _undoMenuItem.IsEnabled = UndoButton.IsEnabled;
+        if (_redoMenuItem is not null) _redoMenuItem.IsEnabled = RedoButton.IsEnabled;
 
-        Title = _path is null ? AppTitle : $"{Path.GetFileName(_path)}{(_isDirty ? " •" : "")} — {AppTitle}";
+        Title = _path is null ? AppTitle : $"{Path.GetFileName(_path)}{(IsDirty ? " •" : "")} — {AppTitle}";
         FileInfoText.Text = _image is null
             ? ""
-            : $"{_path}    {_image.Width} × {_image.Height}    {_image.Channels} ch {_image.ColorSpace}    {_image.SampleFormatName}";
+            : $"{_path}    {_image.Width} × {_image.Height}{(_crop is { } c ? $" (cropped to {c.Width} × {c.Height})" : "")}    {_image.Channels} ch {_image.ColorSpace}    {_image.SampleFormatName}";
         UpdateZoomText();
     }
 

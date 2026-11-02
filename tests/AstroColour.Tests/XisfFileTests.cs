@@ -151,6 +151,96 @@ public class XisfFileTests : IDisposable
         Assert.Empty(saved.Elements(XisfFile.Ns + "Property"));
     }
 
+    private static string F64Property(string id, string type, double[] values, string shape) =>
+        $"<Property id=\"{id}\" type=\"{type}\" {shape} location=\"inline:base64\">" +
+        Convert.ToBase64String(values.SelectMany(BitConverter.GetBytes).ToArray()) + "</Property>";
+
+    private static double[] ReadF64(XElement image, string id) =>
+        Convert.FromBase64String(image.Elements(XisfFile.Ns + "Property").Single(p => (string?)p.Attribute("id") == id).Value)
+            .Chunk(8).Select(b => BitConverter.ToDouble(b)).ToArray();
+
+    private static (double, double) Project(double[] m, double x, double y)
+    {
+        double w = m[6] * x + m[7] * y + m[8];
+        return ((m[0] * x + m[1] * y + m[2]) / w, (m[3] * x + m[4] * y + m[5]) / w);
+    }
+
+    /// <summary>A PixInsight 1.9 style solution: properties only, no WCS keywords.</summary>
+    private static string PixInsightSolution(double[] imageToProjection, double[] projectionToImage) =>
+        F64Property("AstrometricSolution:ReferenceImageCoordinates", "F64Vector", [3.5, 2.25], "length=\"2\"") +
+        F64Property("AstrometricSolution:ControlPoints:Image", "F64Matrix", [1, 1, 6, 4], "rows=\"2\" columns=\"2\"") +
+        F64Property("AstrometricSolution:ControlPoints:Celestial", "F64Matrix", [10, 20, 11, 21], "rows=\"2\" columns=\"2\"") +
+        F64Property("AstrometricSolution:LinearTransformationMatrix", "F64Matrix", [0.1, 0.02, -0.03, 0.1], "rows=\"2\" columns=\"2\"") +
+        F64Property("AstrometricSolution:ProjectiveTransformation:ImageToProjection", "F64Matrix", imageToProjection, "rows=\"3\" columns=\"3\"") +
+        F64Property("AstrometricSolution:ProjectiveTransformation:ProjectionToImage", "F64Matrix", projectionToImage, "rows=\"3\" columns=\"3\"") +
+        "<Property id=\"AstrometricSolution:ProjectionSystem\" type=\"String\">Gnomonic</Property>" +
+        "<Property id=\"PCL:AstrometricSolution:Generation:SplineOrder\" type=\"Int32\" value=\"2\"/>" +
+        F64Property("PCL:AstrometricSolution:Grid:ImageToProjection:Rect", "F64Vector", [0, 0, W, H], "length=\"4\"");
+
+    [Fact]
+    public void Cropping_moves_pixinsight_solution_properties()
+    {
+        // A projective transform with perspective terms, and its inverse.
+        double[] toProjection = [0.1, 0.02, -0.4, -0.03, 0.1, -0.2, 0.001, 0.002, 1];
+        double[] toImage = Invert(toProjection);
+        var source = XisfFile.Load(WriteXisf(Float32Planar(), "sampleFormat=\"Float32\" bounds=\"0:1\"",
+            imageChildren: PixInsightSolution(toProjection, toImage)));
+
+        var output = Path.Combine(_dir, "cropped.xisf");
+        source.Save(output, crop: new CropRect(2, 1, 4, 3));
+        var saved = ReadHeader(output).Root!.Element(XisfFile.Ns + "Image")!;
+
+        Assert.Equal([1.5, 1.25], ReadF64(saved, "AstrometricSolution:ReferenceImageCoordinates"));
+        Assert.Equal([-1, 0, 4, 3], ReadF64(saved, "AstrometricSolution:ControlPoints:Image"));
+        Assert.Equal([10, 20, 11, 21], ReadF64(saved, "AstrometricSolution:ControlPoints:Celestial"));
+        Assert.Equal([0.1, 0.02, -0.03, 0.1], ReadF64(saved, "AstrometricSolution:LinearTransformationMatrix"));
+
+        // Every cropped pixel projects where the same original pixel did, and back again.
+        var newToProjection = ReadF64(saved, "AstrometricSolution:ProjectiveTransformation:ImageToProjection");
+        var newToImage = ReadF64(saved, "AstrometricSolution:ProjectiveTransformation:ProjectionToImage");
+        foreach (var (x, y) in new[] { (0.0, 0.0), (3.5, 2.5), (1.0, 2.0) })
+        {
+            var expected = Project(toProjection, x + 2, y + 1);
+            var actual = Project(newToProjection, x, y);
+            Assert.Equal(expected.Item1, actual.Item1, 10);
+            Assert.Equal(expected.Item2, actual.Item2, 10);
+            var back = Project(newToImage, actual.Item1, actual.Item2);
+            Assert.Equal(x, back.Item1, 9);
+            Assert.Equal(y, back.Item2, 9);
+        }
+
+        // The cached grids are dropped for PixInsight to rebuild; the generation settings stay.
+        var ids = saved.Elements(XisfFile.Ns + "Property").Select(p => (string?)p.Attribute("id")).ToList();
+        Assert.DoesNotContain("PCL:AstrometricSolution:Grid:ImageToProjection:Rect", ids);
+        Assert.Contains("PCL:AstrometricSolution:Generation:SplineOrder", ids);
+        Assert.Contains("AstrometricSolution:ProjectionSystem", ids);
+    }
+
+    [Fact]
+    public void Rotating_drops_pixinsight_solution_properties_of_either_kind()
+    {
+        double[] identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+        var source = XisfFile.Load(WriteXisf(Float32Planar(), "sampleFormat=\"Float32\" bounds=\"0:1\"",
+            imageChildren: PixInsightSolution(identity, identity)));
+        var output = Path.Combine(_dir, "rotated-solution.xisf");
+        source.Save(output, rotation: Rotation.Clockwise);
+        var saved = ReadHeader(output).Root!.Element(XisfFile.Ns + "Image")!;
+        Assert.DoesNotContain(saved.Elements(XisfFile.Ns + "Property"),
+            p => ((string?)p.Attribute("id"))!.Contains("AstrometricSolution:"));
+    }
+
+    private static double[] Invert(double[] m)
+    {
+        double a = m[0], b = m[1], c = m[2], d = m[3], e = m[4], f = m[5], g = m[6], h = m[7], i = m[8];
+        double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+        return
+        [
+            (e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det,
+            (f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det,
+            (d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det,
+        ];
+    }
+
     [Theory]
     [InlineData("Float32")]
     [InlineData("UInt16")]

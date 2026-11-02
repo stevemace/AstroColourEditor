@@ -14,8 +14,9 @@ public sealed class AdjustmentSet
     private readonly Entry[] _entries;
     private readonly bool[] _anySelected; // bin i: does any adjustment select hues in [i, i+1]?
     private readonly bool _anyCurves;
+    private readonly bool _anyLuminance;
 
-    private readonly record struct Entry(float[] HueWeights, float ChromaEdge, float LightLow, float LightHigh, float LightSoftness,
+    private readonly record struct Entry(float[] HueWeights, float ChromaEdge, bool ByLuminance, float LightLow, float LightHigh, float LightSoftness,
         float HueShift, float Saturation, float Lightness, CurveLookup? Curves);
 
     /// <param name="adjustments">Adjustments to include; disabled or no-op ones are skipped unless <paramref name="includeAll"/>.</param>
@@ -24,11 +25,12 @@ public sealed class AdjustmentSet
     {
         _entries = adjustments
             .Where(a => includeAll || (a.Enabled && a.HasEdits))
-            .Select(a => new Entry(HueTable(a), a.NeutralProtection / 100f,
+            .Select(a => new Entry(HueTable(a), a.NeutralProtection / 100f, a.LimitBy == BrightnessMeasure.Luminance,
                 a.LightnessMin / 100f, a.LightnessMax / 100f, a.LightnessSmoothness / 100f,
                 a.HueShift, a.Saturation / 100f, a.Lightness / 100f, Lookup(a.Curves)))
             .ToArray();
         _anyCurves = _entries.Any(e => e.Curves is not null);
+        _anyLuminance = _entries.Any(e => e.ByLuminance);
 
         _anySelected = new bool[Bins];
         foreach (var e in _entries)
@@ -56,12 +58,26 @@ public sealed class AdjustmentSet
         return table;
     }
 
-    /// <summary>Selection weight (0..1) of the first adjustment for a pixel's hue, chroma and lightness.</summary>
+    /// <summary>
+    /// Selection weight (0..1) of the first adjustment for a pixel's hue, chroma and brightness, where
+    /// <paramref name="lightness"/> is measured as that adjustment's <see cref="ColourAdjustment.LimitBy"/> says.
+    /// </summary>
     public float Weight(float hue, float chroma, float lightness) =>
-        _entries.Length == 0 ? 0f : Weight(_entries[0], hue, chroma, lightness);
+        _entries.Length == 0 ? 0f : Weight(_entries[0], hue, chroma, lightness, lightness);
+
+    /// <summary>Selection weight (0..1) of the first adjustment for a colour; channels are clamped to [0,1].</summary>
+    public float WeightOfColour(float r, float g, float b)
+    {
+        if (_entries.Length == 0) return 0f;
+        r = Math.Clamp(r, 0f, 1f);
+        g = Math.Clamp(g, 0f, 1f);
+        b = Math.Clamp(b, 0f, 1f);
+        ColourMath.RgbToHsl(r, g, b, out float h, out _, out float l, out float chroma);
+        return chroma <= 1e-7f ? 0f : Weight(_entries[0], h, chroma, l, ColourMath.Luminance(r, g, b));
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private static float Weight(in Entry e, float hue, float chroma, float lightness)
+    private static float Weight(in Entry e, float hue, float chroma, float lightness, float luminance)
     {
         float pos = hue * (Bins / 360f);
         int i = (int)pos;
@@ -69,7 +85,7 @@ public sealed class AdjustmentSet
         float frac = pos - i;
         float w = e.HueWeights[i] + (e.HueWeights[i + 1] - e.HueWeights[i]) * frac;
         if (w <= 0f) return w;
-        w *= ColourAdjustment.LightnessWeight(lightness, e.LightLow, e.LightHigh, e.LightSoftness);
+        w *= ColourAdjustment.LightnessWeight(e.ByLuminance ? luminance : lightness, e.LightLow, e.LightHigh, e.LightSoftness);
         if (w <= 0f || e.ChromaEdge <= 0f) return w;
         float t = Math.Clamp(chroma / e.ChromaEdge, 0f, 1f);
         return w * t * t * (3f - 2f * t);
@@ -103,11 +119,12 @@ public sealed class AdjustmentSet
         if (!_anySelected[bin]) return false;
 
         float l = (max + min) * 0.5f;
+        float y = _anyLuminance ? ColourMath.Luminance(cr, cg, cb) : l;
         float dh = 0f, ds = 0f, dl = 0f;
         bool selected = false;
         foreach (ref readonly var e in _entries.AsSpan())
         {
-            float w = Weight(e, h, chroma, l);
+            float w = Weight(e, h, chroma, l, y);
             if (w <= 0f) continue;
             selected = true;
             dh += w * e.HueShift;
@@ -133,7 +150,7 @@ public sealed class AdjustmentSet
             foreach (ref readonly var e in _entries.AsSpan())
             {
                 if (e.Curves is null) continue;
-                float w = Weight(e, h, chroma, l);
+                float w = Weight(e, h, chroma, l, y);
                 if (w <= 0f) continue;
                 float tr = r, tg = g, tb = b;
                 e.Curves.Apply(ref tr, ref tg, ref tb);

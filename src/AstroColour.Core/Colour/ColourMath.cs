@@ -54,6 +54,10 @@ public static class ColourMath
         return p;
     }
 
+    /// <summary>Rec. 709 luminance of a colour.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float Luminance(float r, float g, float b) => 0.2126f * r + 0.7152f * g + 0.0722f * b;
+
     public static float Hue(float r, float g, float b)
     {
         RgbToHsl(r, g, b, out float h, out _, out _, out _);

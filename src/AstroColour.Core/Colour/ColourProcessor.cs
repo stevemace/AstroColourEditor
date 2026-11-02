@@ -7,7 +7,7 @@ namespace AstroColour.Core.Colour;
 
 public enum PreviewMode
 {
-    /// <summary>The image with the base adjustments (narrowband, curves, saturation, purple removal), colour adjustments and stars applied.</summary>
+    /// <summary>The image with the base adjustments (narrowband, curves, saturation, purple removal, hue curves), colour adjustments and stars applied.</summary>
     Adjusted,
     /// <summary>The unedited image, for before/after comparison.</summary>
     Original,
@@ -15,22 +15,36 @@ public enum PreviewMode
     Mask,
 }
 
+/// <summary>The shares of pixels the edits clip to black and to white, as shown by the clipping overlay.</summary>
+public readonly record struct ClippingStats(double Shadows, double Highlights);
+
 public static class ColourProcessor
 {
+    /// <summary>Outputs this close to 0 or 1 count as clipped: they show as pure black or white on screen.</summary>
+    public const float ClipThreshold = 0.5f / 255f;
+
     /// <summary>
     /// Renders the image into an 8-bit BGRA buffer of Width×Height×4 bytes. <paramref name="narrowband"/> normalisation
-    /// is applied first, then <paramref name="curves"/>, then <paramref name="saturation"/>, then <paramref name="removePurple"/>
-    /// (see <see cref="BaseAdjustments"/>), then the colour adjustments, then <paramref name="stars"/> (which must match
+    /// is applied first, then <paramref name="curves"/>, then <paramref name="saturation"/>, then <paramref name="removePurple"/>,
+    /// then <paramref name="hueCurves"/> (see <see cref="BaseAdjustments"/>), then the colour adjustments, then <paramref name="stars"/> (which must match
     /// the image's size).
     /// </summary>
     /// <param name="saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
     /// <param name="removePurple">How far green moves towards the red/blue average, 0–1.</param>
-    public static void RenderPreview(RgbImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves,
+    /// <param name="showClipping">
+    /// In <see cref="PreviewMode.Adjusted"/> mode, paint pixels the edits push to black blue, those pushed to white red,
+    /// and those with channels pushed both ways magenta. A channel already at black or white in the original doesn't
+    /// count, and the stars are left out, since their cores are meant to be white.
+    /// </param>
+    /// <returns>The shares of pixels clipped, if <paramref name="showClipping"/>; otherwise zero.</returns>
+    public static ClippingStats RenderPreview(RgbImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves,
         PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default, StarLayer? stars = null,
-        float saturation = 0f, NarrowbandNormalization? narrowband = null, float removePurple = 0f)
+        float saturation = 0f, NarrowbandNormalization? narrowband = null, float removePurple = 0f, HueCurveSet? hueCurves = null,
+        bool showClipping = false)
     {
         var baseAdjustments = mode == PreviewMode.Original ? null
-            : BaseAdjustments.Create(narrowband, curves is null ? null : new CurveLookup(curves), saturation, removePurple);
+            : BaseAdjustments.Create(narrowband, curves is null ? null : new CurveLookup(curves), saturation, removePurple,
+                hueCurves is null ? null : new HueCurveLookup(hueCurves));
         var set = new AdjustmentSet(adjustments);
         var maskSet = mode == PreviewMode.Mask && mask is not null ? new AdjustmentSet([mask], includeAll: true) : null;
         if (mode == PreviewMode.Original) set = new AdjustmentSet([]);
@@ -41,11 +55,14 @@ public static class ColourProcessor
         float[] rp = image.R, gp = image.G, bp = image.B;
         int width = image.Width;
         var options = new ParallelOptions { CancellationToken = cancellation };
+        bool clipping = showClipping && mode == PreviewMode.Adjusted;
+        long shadowCount = 0, highlightCount = 0;
 
         Parallel.For(0, image.Height, options, [MethodImpl(MethodImplOptions.AggressiveOptimization)] (int y) =>
         {
             var output = MemoryMarshal.Cast<byte, uint>(bgra.AsSpan());
             int row = y * width;
+            int rowShadows = 0, rowHighlights = 0;
             for (int i = row; i < row + width; i++)
             {
                 float r = rp[i], g = gp[i], b = bp[i];
@@ -55,9 +72,8 @@ public static class ColourProcessor
                 {
                     float cr = Math.Clamp(r, 0f, 1f), cg = Math.Clamp(g, 0f, 1f), cb = Math.Clamp(b, 0f, 1f);
                     set.Adjust(ref r, ref g, ref b);
-                    ColourMath.RgbToHsl(cr, cg, cb, out float h, out _, out float l, out float chroma);
-                    float w = maskSet.Weight(h, chroma, l);
-                    float grey = 0.2126f * cr + 0.7152f * cg + 0.0722f * cb;
+                    float w = maskSet.WeightOfColour(cr, cg, cb);
+                    float grey = ColourMath.Luminance(cr, cg, cb);
                     r = grey + (r - grey) * w;
                     g = grey + (g - grey) * w;
                     b = grey + (b - grey) * w;
@@ -65,23 +81,46 @@ public static class ColourProcessor
                 else
                 {
                     set.Adjust(ref r, ref g, ref b);
+                    if (clipping)
+                    {
+                        int flags = ClipFlags(rp[i], r) | ClipFlags(gp[i], g) | ClipFlags(bp[i], b);
+                        if (flags != 0)
+                        {
+                            rowShadows += flags & 1;
+                            rowHighlights += flags >> 1;
+                            output[i] = 0xFF000000u | ((flags & 2) != 0 ? 0xFF0000u : 0u) | ((flags & 1) != 0 ? 0xFFu : 0u);
+                            continue;
+                        }
+                    }
                     stars?.Apply(i, ref r, ref g, ref b);
                 }
 
                 output[i] = 0xFF000000u | (uint)ToByte(r) << 16 | (uint)ToByte(g) << 8 | ToByte(b);
             }
+            if (rowShadows != 0) Interlocked.Add(ref shadowCount, rowShadows);
+            if (rowHighlights != 0) Interlocked.Add(ref highlightCount, rowHighlights);
         });
+        return clipping && image.PixelCount > 0
+            ? new ClippingStats(shadowCount / (double)image.PixelCount, highlightCount / (double)image.PixelCount)
+            : default;
     }
+
+    /// <summary>1 if the edits took a channel from above black to black, 2 if from below white to white, else 0.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int ClipFlags(float before, float after) =>
+        (after <= ClipThreshold && before > ClipThreshold ? 1 : 0) |
+        (after >= 1f - ClipThreshold && before < 1f - ClipThreshold ? 2 : 0);
 
     /// <summary>
     /// Applies the narrowband normalisation, then the curves, then the global saturation, then the purple removal,
-    /// then the adjustments, then the stars at full precision, returning new planes for saving. A single-channel
+    /// then the hue curves, then the adjustments, then the stars at full precision, returning new planes for saving. A single-channel
     /// image takes only the curves and the stars' luminance.
     /// </summary>
     /// <param name="saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
     /// <param name="removePurple">How far green moves towards the red/blue average, 0–1.</param>
     public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves = null,
-        StarLayer? stars = null, float saturation = 0f, NarrowbandNormalization? narrowband = null, float removePurple = 0f)
+        StarLayer? stars = null, float saturation = 0f, NarrowbandNormalization? narrowband = null, float removePurple = 0f,
+        HueCurveSet? hueCurves = null)
     {
         var planes = image.Planes.Select(p => (float[])p.Clone()).ToArray();
         var lookup = curves is null ? null : new CurveLookup(curves, monochrome: !image.IsColour);
@@ -107,7 +146,8 @@ public static class ColourProcessor
             return planes;
         }
 
-        var baseAdjustments = BaseAdjustments.Create(narrowband, lookup, saturation, removePurple);
+        var baseAdjustments = BaseAdjustments.Create(narrowband, lookup, saturation, removePurple,
+            hueCurves is null ? null : new HueCurveLookup(hueCurves));
         var set = new AdjustmentSet(adjustments);
         if (baseAdjustments is null && set.IsEmpty && stars is null) return planes;
 

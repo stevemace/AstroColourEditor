@@ -5,21 +5,24 @@ namespace AstroColour.Core.Colour;
 
 /// <summary>
 /// The whole-image changes made before the colour editor, in order: narrowband normalisation, the curves, global
-/// saturation, then purple removal. The colour editor, its picker and its curves' histogram see the image after these.
+/// saturation, purple removal, then the hue curves. The colour editor, its picker and its curves' histogram see the image after these.
 /// </summary>
 /// <param name="Curves">The Global tab's curves, or null for none.</param>
 /// <param name="Saturation">Saturation change for the whole image, −100 (grey) to +100 (doubled).</param>
 /// <param name="RemovePurple">How far green moves towards the red/blue average, 0–1.</param>
-public sealed record BaseAdjustments(NarrowbandNormalization? Narrowband, CurveLookup? Curves, float Saturation, float RemovePurple)
+/// <param name="HueCurves">The hue-versus-hue and hue-versus-saturation curves, or null for none.</param>
+public sealed record BaseAdjustments(NarrowbandNormalization? Narrowband, CurveLookup? Curves, float Saturation, float RemovePurple,
+    HueCurveLookup? HueCurves = null)
 {
     /// <summary>Null when nothing would change.</summary>
     public static BaseAdjustments? Create(NarrowbandNormalization? narrowband, CurveLookup? curves = null,
-        float saturation = 0f, float removePurple = 0f)
+        float saturation = 0f, float removePurple = 0f, HueCurveLookup? hueCurves = null)
     {
         if (curves is { IsEmpty: true }) curves = null;
-        return narrowband is null && curves is null && saturation == 0f && removePurple == 0f
+        if (hueCurves is { IsEmpty: true }) hueCurves = null;
+        return narrowband is null && curves is null && saturation == 0f && removePurple == 0f && hueCurves is null
             ? null
-            : new BaseAdjustments(narrowband, curves, saturation, removePurple);
+            : new BaseAdjustments(narrowband, curves, saturation, removePurple, hueCurves);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -29,6 +32,7 @@ public sealed record BaseAdjustments(NarrowbandNormalization? Narrowband, CurveL
         Curves?.Apply(ref r, ref g, ref b);
         if (Saturation != 0f) Saturate(ref r, ref g, ref b, Saturation);
         if (RemovePurple != 0f) RemovePurpleFrom(r, ref g, b, RemovePurple);
+        HueCurves?.Apply(ref r, ref g, ref b);
     }
 
     /// <summary>Scales a pixel's HSL saturation by 1 + <paramref name="amount"/>/100, clamping it to [0,1].</summary>

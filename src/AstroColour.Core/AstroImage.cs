@@ -27,6 +27,12 @@ public interface IAstroImage
     /// <summary>The image's FITS header keywords, carried into a file saved in another format that can hold them.</summary>
     IReadOnlyList<FitsKeyword> FitsKeywords => [];
 
+    /// <summary>
+    /// True if pixel row 1 of the image's WCS keywords is the bottom row as displayed (see <see cref="Wcs.CropShift"/>):
+    /// for bottom-up FITS files, and for XISF files, whose keywords PixInsight writes for a bottom-left origin.
+    /// </summary>
+    bool WcsFirstRowAtBottom => false;
+
     /// <summary>Pixel data, one plane per channel, normalised to [0,1] (floats may exceed this range).</summary>
     float[][] Planes { get; }
 
@@ -35,9 +41,10 @@ public interface IAstroImage
 
     /// <summary>
     /// Writes the file in its original format, replacing the pixels with <paramref name="planes"/> if given,
-    /// and then turning the image by <paramref name="rotation"/>. A rotated image loses its astrometric solution.
+    /// then cropping it to <paramref name="crop"/> and turning it by <paramref name="rotation"/>. A cropped image keeps
+    /// its astrometric solution, with the reference pixel moved; a rotated image loses it.
     /// </summary>
-    void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None);
+    void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None, CropRect? crop = null);
 }
 
 public enum ImageFormat { Xisf, Fits, Tiff, Png, Jpeg }
@@ -110,32 +117,48 @@ public static class AstroImageFile
     }
 
     /// <summary>
-    /// Saves <paramref name="image"/> with its pixels replaced by <paramref name="planes"/> (if given) and turned
-    /// by <paramref name="rotation"/>, in the format given by the extension of <paramref name="path"/>.
+    /// Saves <paramref name="image"/> with its pixels replaced by <paramref name="planes"/> (if given), cropped to
+    /// <paramref name="crop"/> and turned by <paramref name="rotation"/>, in the format given by the extension of
+    /// <paramref name="path"/>. A crop keeps the WCS keywords valid by moving CRPIX1/2; a rotation drops them.
     /// In the image's own format every piece of metadata is kept (see <see cref="IAstroImage.Save"/>). Another
     /// format gets a new file: XISF, FITS and TIFF keep the sample format where they can, and XISF and FITS
     /// keep the FITS keywords; PNG is 16-bit unless the image is 8-bit, and JPEG is 8-bit. Extra channels
     /// such as alpha are dropped.
     /// </summary>
-    public static void Save(IAstroImage image, string path, float[][]? planes = null, Rotation rotation = Rotation.None)
+    public static void Save(IAstroImage image, string path, float[][]? planes = null, Rotation rotation = Rotation.None,
+        CropRect? crop = null)
     {
         var format = FormatOf(path)
             ?? throw new NotSupportedException($"Cannot save a “{Path.GetExtension(path)}” file. Choose XISF, FITS, TIFF, PNG or JPEG.");
         if (format == FormatOf(image) && image is not RawFile)
         {
-            image.Save(path, planes, rotation);
+            image.Save(path, planes, rotation, crop);
             return;
         }
 
         planes ??= image.Planes;
         if (planes.Length != image.Channels || planes.Any(p => p.Length != image.PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
-        planes = rotation.Apply(planes[..(image.IsColour ? 3 : 1)], image.Width, image.Height);
-        var (width, height) = rotation.Size(image.Width, image.Height);
+        var geometry = SaveGeometry.Of(image.Width, image.Height, rotation, crop);
+        planes = geometry.Apply(planes[..(image.IsColour ? 3 : 1)]);
+        var (width, height) = (geometry.Width, geometry.Height);
 
+        var shift = geometry.Crop is { } c ? Wcs.CropShift(c, image.Height, image.WcsFirstRowAtBottom) : (0, 0);
         var keywords = image.FitsKeywords
             .Where(k => !k.IsLayout && !(rotation != Rotation.None && RotationExtensions.IsWcsKeyword(k.Name)))
+            .Select(k => geometry.Crop is null ? k : Wcs.Crop(k, shift))
             .ToList();
+
+        // New FITS files are written top row first, while PixInsight counts XISF keyword rows from the bottom, so
+        // a solution carried between the two counts its rows from the other end.
+        bool? targetFirstRowAtBottom = format switch
+        {
+            ImageFormat.Xisf => true,
+            ImageFormat.Fits => false,
+            _ => null,
+        };
+        if (rotation == Rotation.None && targetFirstRowAtBottom is { } bottom && bottom != image.WcsFirstRowAtBottom)
+            keywords = Wcs.FlipRows(keywords, geometry.Height);
         int bits = image.BitsPerSample;
         bool isFloat = image.IsFloat;
 

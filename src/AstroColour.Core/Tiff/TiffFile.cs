@@ -242,16 +242,17 @@ public sealed class TiffFile : IAstroImage
 
     /// <summary>
     /// Writes the file, replacing the image's pixels with <paramref name="planes"/> (or the current
-    /// <see cref="Planes"/>) turned by <paramref name="rotation"/>. The sample format, planar layout and
-    /// compression are kept; images are always written in strips.
+    /// <see cref="Planes"/>) cropped to <paramref name="crop"/> and turned by <paramref name="rotation"/>. The sample
+    /// format, planar layout and compression are kept; images are always written in strips.
     /// </summary>
-    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None)
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None, CropRect? crop = null)
     {
         planes ??= Planes;
         if (planes.Length != Channels || planes.Any(p => p.Length != PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
-        planes = rotation.Apply(planes, Width, Height);
-        var (width, height) = rotation.Size(Width, Height);
+        var geometry = SaveGeometry.Of(Width, Height, rotation, crop);
+        planes = geometry.Apply(planes);
+        var (width, height) = (geometry.Width, geometry.Height);
 
         var raw = new byte[Channels][];
         Parallel.For(0, Channels, c => raw[c] = Encode(planes[c]));

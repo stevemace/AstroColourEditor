@@ -155,6 +155,27 @@ public class ColourProcessorTests
     }
 
     [Fact]
+    public void Luminance_limits_judge_brightness_as_it_looks()
+    {
+        // Saturated blue has HSL lightness 0.5 but luminance of only about 0.07.
+        var byLightness = new ColourAdjustment { TargetHue = 240, NeutralProtection = 0, LightnessMax = 30, LightnessSmoothness = 0, Saturation = -100 };
+        var byLuminance = byLightness.Clone();
+        byLuminance.LimitBy = BrightnessMeasure.Luminance;
+
+        float r = 0f, g = 0f, b = 1f;
+        Assert.False(new AdjustmentSet([byLightness]).Adjust(ref r, ref g, ref b));
+        Assert.True(new AdjustmentSet([byLuminance]).Adjust(ref r, ref g, ref b));
+
+        Assert.Equal(0f, new AdjustmentSet([byLightness]).WeightOfColour(0f, 0f, 1f));
+        Assert.Equal(1f, new AdjustmentSet([byLuminance]).WeightOfColour(0f, 0f, 1f));
+
+        // Each adjustment in a set uses its own measure.
+        var both = new AdjustmentSet([byLightness, byLuminance]);
+        float r2 = 0f, g2 = 0f, b2 = 1f;
+        Assert.True(both.Adjust(ref r2, ref g2, ref b2));
+    }
+
+    [Fact]
     public void Disabled_and_empty_adjustments_are_skipped()
     {
         Assert.True(new AdjustmentSet([new ColourAdjustment { Saturation = 50, Enabled = false }, new ColourAdjustment()]).IsEmpty);

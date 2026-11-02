@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
@@ -43,6 +44,9 @@ public sealed class XisfFile : IAstroImage
 
     public bool IsColour => Channels >= 3;
     public int PixelCount => Width * Height;
+
+    /// <summary>PixInsight writes WCS keywords for a bottom-left origin, although XISF stores the top row first.</summary>
+    public bool WcsFirstRowAtBottom => true;
 
     private readonly XDocument _header;
     private readonly int _imageIndex;
@@ -354,41 +358,69 @@ public sealed class XisfFile : IAstroImage
 
     /// <summary>
     /// Writes the file, replacing the main image's pixels with <paramref name="planes"/>
-    /// (or the current <see cref="Planes"/>) turned by <paramref name="rotation"/>. The image keeps its
-    /// original sample format and is stored uncompressed and planar; all other header content is preserved,
-    /// except that a rotated image loses its astrometric solution.
+    /// (or the current <see cref="Planes"/>) cropped to <paramref name="crop"/> and turned by <paramref name="rotation"/>.
+    /// The image keeps its original sample format and is stored uncompressed and planar; all other header content is
+    /// preserved, except that a rotated image loses its astrometric solution. A cropped image keeps its solution:
+    /// WCS keywords have CRPIX1/2 moved, and PixInsight's solution properties are moved too (see <see cref="MoveAstrometry"/>).
     /// </summary>
-    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None)
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None, CropRect? crop = null)
     {
         planes ??= Planes;
         if (planes.Length != Channels || planes.Any(p => p.Length != PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
-        planes = rotation.Apply(planes, Width, Height);
+        var geometry = SaveGeometry.Of(Width, Height, rotation, crop);
+        planes = geometry.Apply(planes);
 
         var doc = new XDocument(_header);
         var root = doc.Root!;
         var all = root.DescendantsAndSelf().ToList();
         var image = root.Elements(Ns + "Image").ElementAt(_imageIndex);
 
+        if (geometry.ChangesSize)
+        {
+            image.SetAttributeValue("geometry", $"{geometry.Width}:{geometry.Height}:{Channels}");
+            foreach (var k in image.Elements(Ns + "FITSKeyword"))
+            {
+                string name = ((string?)k.Attribute("name") ?? "").Trim().ToUpperInvariant();
+                if (name is "NAXIS1" or "NAXIS2")
+                    k.SetAttributeValue("value", (name == "NAXIS1" ? geometry.Width : geometry.Height).ToString(CultureInfo.InvariantCulture));
+            }
+        }
         if (rotation != Rotation.None)
         {
-            var (width, height) = rotation.Size(Width, Height);
-            image.SetAttributeValue("geometry", $"{width}:{height}:{Channels}");
             image.Elements(Ns + "FITSKeyword")
                 .Where(k => RotationExtensions.IsWcsKeyword((string?)k.Attribute("name") ?? ""))
                 .Remove();
-            image.Elements(Ns + "Property")
-                .Where(p => ((string?)p.Attribute("id"))?.StartsWith("PCL:AstrometricSolution", StringComparison.Ordinal) == true)
-                .Remove();
+        }
+        else if (geometry.Crop is { } c)
+        {
+            var shift = Wcs.CropShift(c, Height, firstRowAtBottom: true);
+            foreach (var k in image.Elements(Ns + "FITSKeyword"))
+            {
+                var keyword = new FitsKeyword((string?)k.Attribute("name") ?? "", (string?)k.Attribute("value") ?? "", "");
+                var moved = Wcs.Crop(keyword, shift);
+                if (moved != keyword) k.SetAttributeValue("value", moved.Value);
+            }
+        }
+        var attachments = _otherAttachments.ToDictionary(a => all[a.Index], a => a.Data);
+        if (rotation != Rotation.None)
+        {
+            AstrometryProperties(image).Remove();
+        }
+        else if (geometry.Crop is { } cropped && AstrometryProperties(image).Any())
+        {
+            // PixInsight's image coordinates count from the top-left corner, so the crop is a plain translation.
+            if (!MoveAstrometry(image, cropped.X, cropped.Y, attachments))
+                AstrometryProperties(image).Remove(); // in a form that can't be moved: better none than a wrong one
         }
 
         var blocks = new List<(XElement Element, byte[] Data)> { (image, EncodeSamples(planes)) };
-        foreach (var (index, data) in _otherAttachments)
+        foreach (var (index, _) in _otherAttachments)
         {
             var el = all[index];
             // Thumbnails would no longer match the edited image, so they are dropped, as are removed properties.
             if (el.AncestorsAndSelf().Any(a => a.Name.LocalName == "Thumbnail") || el.Document != doc) continue;
-            blocks.Add((el, data));
+            blocks.Add((el, attachments[el]));
         }
         root.Descendants(Ns + "Thumbnail").ToList().Remove();
 
@@ -436,6 +468,108 @@ public sealed class XisfFile : IAstroImage
         File.Move(tempPath, fullPath, overwrite: true);
     }
 
+    // ----------------------------------------------------------- astrometry
+
+    /// <summary>
+    /// PixInsight's astrometric solution: <c>AstrometricSolution:*</c> properties (PixInsight 1.8.9 and later, which
+    /// may write no WCS keywords at all) and <c>PCL:AstrometricSolution:*</c> ones (generation settings and cached grids).
+    /// </summary>
+    private static IEnumerable<XElement> AstrometryProperties(XElement image) =>
+        image.Elements(Ns + "Property").Where(p => ((string?)p.Attribute("id"))?.Contains("AstrometricSolution:", StringComparison.Ordinal) == true);
+
+    /// <summary>
+    /// Moves PixInsight's astrometric solution to an image cropped by <paramref name="dx"/> columns from the left and
+    /// <paramref name="dy"/> rows from the top: the reference point and the image control points move by (−dx, −dy), and
+    /// the projective transformations are composed with that translation. The linear matrix is relative to the
+    /// reference point, so it stays. The cached distortion grids (<c>PCL:AstrometricSolution:Grid:*</c>) are dropped;
+    /// PixInsight builds them again from the control points. Returns false, changing nothing, if a property is in a
+    /// form this can't move (compressed, or not 64-bit floats of the expected shape).
+    /// </summary>
+    private static bool MoveAstrometry(XElement image, int dx, int dy, Dictionary<XElement, byte[]> attachments)
+    {
+        const string prefix = "AstrometricSolution:";
+        var properties = image.Elements(Ns + "Property").ToDictionary(p => (string?)p.Attribute("id") ?? "", p => p);
+        var changes = new List<(XElement Property, double[] Values)>();
+
+        bool Change(string id, int count, Action<double[]> move)
+        {
+            if (!properties.TryGetValue(prefix + id, out var p)) return true; // absent: nothing to move
+            if (p.Attribute("compression") is not null || ReadDoubles(p, attachments) is not { } values || values.Length != count && count > 0)
+                return false;
+            if (count == 0 && values.Length % 2 != 0) return false;
+            move(values);
+            changes.Add((p, values));
+            return true;
+        }
+
+        bool ok =
+            Change("ReferenceImageCoordinates", 2, v => { v[0] -= dx; v[1] -= dy; }) &&
+            Change("ControlPoints:Image", 0, v => { for (int i = 0; i < v.Length; i += 2) { v[i] -= dx; v[i + 1] -= dy; } }) &&
+            // projection = M · (x, y, 1) with x = x' + dx, y = y' + dy: the third column takes M's first two columns.
+            Change("ProjectiveTransformation:ImageToProjection", 9, m =>
+            {
+                for (int r = 0; r < 3; r++) m[3 * r + 2] += m[3 * r] * dx + m[3 * r + 1] * dy;
+            }) &&
+            // (x', y', 1) ∝ T⁻¹ · N · projection: rows 1 and 2 lose dx and dy times row 3.
+            Change("ProjectiveTransformation:ProjectionToImage", 9, n =>
+            {
+                for (int c = 0; c < 3; c++)
+                {
+                    n[c] -= dx * n[6 + c];
+                    n[3 + c] -= dy * n[6 + c];
+                }
+            });
+        if (!ok) return false;
+
+        foreach (var (p, values) in changes) WriteDoubles(p, values, attachments);
+        image.Elements(Ns + "Property")
+            .Where(p => ((string?)p.Attribute("id"))?.StartsWith("PCL:AstrometricSolution:Grid:", StringComparison.Ordinal) == true)
+            .Remove();
+        return true;
+    }
+
+    /// <summary>A property's little-endian 64-bit float values, inline (base64 or hex) or attached; null otherwise.</summary>
+    private static double[]? ReadDoubles(XElement property, Dictionary<XElement, byte[]> attachments)
+    {
+        if ((string?)property.Attribute("type") is not ("F64Vector" or "F64Matrix")) return null;
+        string location = (string?)property.Attribute("location") ?? "";
+        byte[]? data;
+        try
+        {
+            data = location switch
+            {
+                "inline:base64" => Convert.FromBase64String(property.Value.Trim()),
+                "inline:hex" => Convert.FromHexString(property.Value.Trim()),
+                _ when location.StartsWith("attachment:", StringComparison.Ordinal) => attachments.GetValueOrDefault(property),
+                _ => null,
+            };
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+        if (data is null || data.Length % 8 != 0) return null;
+        var values = new double[data.Length / 8];
+        for (int i = 0; i < values.Length; i++) values[i] = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(i * 8));
+        return values;
+    }
+
+    private static void WriteDoubles(XElement property, double[] values, Dictionary<XElement, byte[]> attachments)
+    {
+        var data = new byte[values.Length * 8];
+        for (int i = 0; i < values.Length; i++) BinaryPrimitives.WriteDoubleLittleEndian(data.AsSpan(i * 8), values[i]);
+        string location = (string?)property.Attribute("location") ?? "";
+        if (location.StartsWith("attachment:", StringComparison.Ordinal))
+        {
+            attachments[property] = data; // same size; its position is laid out afresh when saving
+        }
+        else
+        {
+            property.SetAttributeValue("location", "inline:base64");
+            property.Value = Convert.ToBase64String(data);
+        }
+    }
+
     private static long Align(long value, int alignment) => (value + alignment - 1) / alignment * alignment;
 
     private static void WriteZeros(Stream s, long count)
@@ -461,7 +595,7 @@ public sealed class XisfFile : IAstroImage
 
     private byte[] EncodeSamples(float[][] planes)
     {
-        int n = PixelCount;
+        int n = planes[0].Length;
         int bps = BytesPerSample(SampleFormat);
         var data = new byte[(long)n * Channels * bps];
         double range = BoundsHigh - BoundsLow;

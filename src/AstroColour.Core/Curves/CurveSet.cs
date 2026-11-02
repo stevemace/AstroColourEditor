@@ -33,6 +33,16 @@ public sealed class CurveSet
         foreach (var curve in _curves) curve.Reset();
     }
 
+    /// <summary>Makes every curve a copy of <paramref name="other"/>'s, keeping these curve objects.</summary>
+    public void CopyFrom(CurveSet other)
+    {
+        for (int i = 0; i < _curves.Length; i++)
+        {
+            _curves[i].Points.Clear();
+            _curves[i].Points.AddRange(other._curves[i].Points);
+        }
+    }
+
     /// <summary>
     /// Sparse histograms of the image for drawing behind the curves, indexed by <see cref="CurveChannel"/>
     /// (luminance for <see cref="CurveChannel.Rgb"/>). Bin heights are square-root scaled to [0,1].
@@ -53,9 +63,7 @@ public sealed class CurveSet
             float w = 1f;
             if (weights is not null)
             {
-                ColourMath.RgbToHsl(Math.Clamp(r, 0f, 1f), Math.Clamp(g, 0f, 1f), Math.Clamp(b, 0f, 1f),
-                    out float h, out _, out float l, out float chroma);
-                w = chroma <= 1e-7f ? 0f : weights.Weight(h, chroma, l);
+                w = weights.WeightOfColour(r, g, b);
                 if (w <= 0f) continue;
             }
             counts[0][Bin(0.2126f * r + 0.7152f * g + 0.0722f * b, bins)] += w;

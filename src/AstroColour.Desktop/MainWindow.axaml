@@ -60,6 +60,18 @@
             <Setter Property="MinHeight" Value="40" />
             <Setter Property="Padding" Value="12,0" />
         </Style>
+        <Style Selector="Border.splitLabel">
+            <Setter Property="VerticalAlignment" Value="Bottom" />
+            <Setter Property="Margin" Value="8,0,8,16" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Background" Value="#B0000000" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+        </Style>
+        <Style Selector="Border.splitLabel > TextBlock">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
         <Style Selector="UniformGrid.segments > ToggleButton">
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -77,6 +89,9 @@
                     <TextBlock Text="Open" Classes="iconLabel" />
                 </StackPanel>
             </Button>
+            <Button x:Name="RecentButton" Classes="tool" Padding="4,6" Margin="-2,0,0,0" ToolTip.Tip="Open a recent file">
+                <controls:LineIcon Width="10" Height="10" Data="M2,4 L5,7 L8,4" />
+            </Button>
             <Button x:Name="SaveButton" Classes="tool" Click="Save_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M2.5,2.5 H11 L13.5,5 V13.5 H2.5 Z M5,2.5 V5.5 H10 V2.5 M4.5,13.5 V9 H11.5 V13.5" />
@@ -90,12 +105,25 @@
                 </StackPanel>
             </Button>
             <Rectangle Classes="separator" />
+            <Button x:Name="UndoButton" Classes="tool" Click="Undo_Click">
+                <controls:LineIcon Data="M5,2.5 L2,5.5 L5,8.5 M2,5.5 H10 A4,4 0 0 1 10,13.5 H6" />
+            </Button>
+            <Button x:Name="RedoButton" Classes="tool" Click="Redo_Click">
+                <controls:LineIcon Data="M11,2.5 L14,5.5 L11,8.5 M14,5.5 H6 A4,4 0 0 0 6,13.5 H10" />
+            </Button>
+            <Rectangle Classes="separator" />
             <Button x:Name="RotateLeftButton" Classes="tool" Click="RotateLeft_Click">
                 <controls:LineIcon Data="M2,8 A6,6 0 1 0 8,2 C6.32,2 4.71,2.67 3.51,3.83 L2,5.33 M2,2 V5.33 H5.33" />
             </Button>
             <Button x:Name="RotateRightButton" Classes="tool" Click="RotateRight_Click">
                 <controls:LineIcon Data="M14,8 A6,6 0 1 1 8,2 C9.68,2 11.29,2.67 12.49,3.83 L14,5.33 M14,2 V5.33 H10.67" />
             </Button>
+            <ToggleButton x:Name="CropButton" Classes="tool" Click="Crop_Click">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <controls:LineIcon Data="M4,1 V12 H15 M1,4 H12 V15" />
+                    <TextBlock Text="Crop" Classes="iconLabel" />
+                </StackPanel>
+            </ToggleButton>
             <Rectangle Classes="separator" />
             <Button x:Name="FitButton" Classes="tool" Click="Fit_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -114,6 +142,18 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <controls:LineIcon Data="M1.5,2.5 H14.5 V13.5 H1.5 Z M8,1 V15" />
                     <TextBlock Text="Before" Classes="iconLabel" />
+                </StackPanel>
+            </ToggleButton>
+            <ToggleButton x:Name="SplitButton" Classes="tool" Click="Split_Click">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <controls:LineIcon Data="M1.5,2.5 H14.5 V13.5 H1.5 Z M8,2.5 V13.5 M5.5,6 L3.5,8 L5.5,10 M10.5,6 L12.5,8 L10.5,10" />
+                    <TextBlock Text="Split" Classes="iconLabel" />
+                </StackPanel>
+            </ToggleButton>
+            <ToggleButton x:Name="ClippingButton" Classes="tool" Click="Clipping_Click">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <controls:LineIcon Data="M8,1.5 L14.5,13.5 H1.5 Z M8,6 V9.5 M8,11.3 V11.8" />
+                    <TextBlock Text="Clipping" Classes="iconLabel" />
                 </StackPanel>
             </ToggleButton>
         </StackPanel>
@@ -136,14 +176,71 @@
                         <LayoutTransformControl x:Name="ImageRotator">
                             <Image x:Name="PreviewImage" Stretch="Fill" />
                         </LayoutTransformControl>
+                        <!-- The unedited image over the left of the split view, clipped at the divider. -->
+                        <LayoutTransformControl x:Name="BeforeRotator" IsVisible="False" IsHitTestVisible="False">
+                            <Image x:Name="BeforeImage" Stretch="Fill" />
+                        </LayoutTransformControl>
+                        <controls:CropOverlay x:Name="CropOverlay" IsVisible="False" IsHitTestVisible="False"
+                                              SelectionChanged="CropOverlay_SelectionChanged" />
                     </Panel>
                 </ScrollViewer>
+
+                <!-- The split view's divider: drag it to move the split. Only the handle takes the pointer. -->
+                <Canvas x:Name="SplitOverlay" IsVisible="False" ClipToBounds="True">
+                    <Grid x:Name="SplitDivider" Width="200" ColumnDefinitions="*,24,*">
+                        <Rectangle Grid.Column="1" Width="2" Fill="#E6FFFFFF" HorizontalAlignment="Center" IsHitTestVisible="False" />
+                        <Border x:Name="SplitHandle" Grid.Column="1" Background="Transparent" Cursor="SizeWestEast"
+                                PointerPressed="SplitHandle_PointerPressed" PointerMoved="SplitHandle_PointerMoved"
+                                PointerReleased="SplitHandle_PointerReleased" ToolTip.Tip="Drag to move the split">
+                            <Border Width="24" Height="24" CornerRadius="12" Background="#E6FFFFFF" VerticalAlignment="Center">
+                                <controls:LineIcon Width="14" Height="14" Foreground="#FF202020"
+                                                   Data="M5.5,4 L2,8 L5.5,12 M10.5,4 L14,8 L10.5,12" />
+                            </Border>
+                        </Border>
+                        <Border Grid.Column="0" Classes="splitLabel" HorizontalAlignment="Right">
+                            <TextBlock Text="Before" />
+                        </Border>
+                        <Border Grid.Column="2" Classes="splitLabel" HorizontalAlignment="Left">
+                            <TextBlock Text="After" />
+                        </Border>
+                    </Grid>
+                </Canvas>
+
+                <!-- Crop settings, shown while cropping. -->
+                <Border x:Name="CropBar" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                        Margin="12,0,12,16" Padding="10,6" CornerRadius="6" Background="{DynamicResource PanelBrush}"
+                        BorderBrush="{DynamicResource PanelStrokeBrush}" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="Aspect" VerticalAlignment="Center" />
+                        <ComboBox x:Name="CropAspectBox" MinWidth="110" SelectedIndex="0" SelectionChanged="CropAspect_SelectionChanged">
+                            <ComboBoxItem Content="Free" />
+                            <ComboBoxItem Content="Original" />
+                            <ComboBoxItem Content="1 : 1" />
+                            <ComboBoxItem Content="5 : 4" />
+                            <ComboBoxItem Content="4 : 5" />
+                            <ComboBoxItem Content="4 : 3" />
+                            <ComboBoxItem Content="3 : 4" />
+                            <ComboBoxItem Content="3 : 2" />
+                            <ComboBoxItem Content="2 : 3" />
+                            <ComboBoxItem Content="16 : 9" />
+                            <ComboBoxItem Content="9 : 16" />
+                        </ComboBox>
+                        <TextBlock x:Name="CropSizeText" VerticalAlignment="Center" MinWidth="110"
+                                   FontFamily="Consolas, Menlo, monospace" FontSize="12" />
+                        <Button Content="Reset" Click="CropReset_Click" ToolTip.Tip="Keep the whole image" />
+                        <Button Content="Done" Classes="accent" Click="CropDone_Click" ToolTip.Tip="Finish cropping (Enter)" />
+                    </StackPanel>
+                </Border>
 
                 <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
                     <controls:LineIcon Data="M4.5,8.5 H43.5 V39.5 H4.5 Z M4.5,33 L16,22 L26,31 L32,26 L43.5,36 M30,16 A3,3 0 1 1 36,16 A3,3 0 1 1 30,16 Z"
                           Width="48" Height="48" Foreground="#FF707070" StrokeThickness="2" HorizontalAlignment="Center" />
                     <TextBlock Text="Open an XISF, FITS or TIFF image to begin" Foreground="#FFB0B0B0" HorizontalAlignment="Center" />
                     <Button Content="Open image…" HorizontalAlignment="Center" Classes="accent" Click="Open_Click" />
+                    <StackPanel x:Name="EmptyRecent" Spacing="2" Margin="0,12,0,0" HorizontalAlignment="Center" MaxWidth="420">
+                        <TextBlock Text="Recent" Foreground="#FF909090" FontSize="12" HorizontalAlignment="Center" Margin="0,0,0,4" />
+                        <StackPanel x:Name="EmptyRecentList" Spacing="2" />
+                    </StackPanel>
                 </StackPanel>
 
                 <StackPanel VerticalAlignment="Top" Margin="12" Spacing="8">
@@ -210,6 +307,12 @@
                                                         Step="0.01" Decimals="2" ValueChanged="GlobalSaturationSlider_ValueChanged" />
                                 <TextBlock TextWrapping="Wrap" Classes="caption secondary" Margin="0,8,0,0"
                                            Text="Saturation applies to the whole image, after the curves. Remove purple then moves green towards the average of red and blue, turning purple towards neutral. Both apply before the colour editor." />
+
+                                <StackPanel x:Name="HueCurvesSection">
+                                    <TextBlock Text="Hue curves" Classes="strong" Margin="0,16,0,8" />
+                                    <controls:HueCurvesView x:Name="HueCurves" CurvesChanged="HueCurves_CurvesChanged"
+                                                            Hint="Drag a point up or down to shift that hue, or to strengthen or mute it; neighbouring hues follow smoothly. Click to add a point; double-click or right-click a point, or drag it off the graph, to remove it. The histogram shows the image's hues, weighted by how colourful each pixel is. Applies after remove purple, before the colour editor." />
+                                </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
@@ -288,6 +391,13 @@
                                                             ValueChanged="EditorSlider_ValueChanged" />
                                     <controls:LabeledSlider x:Name="SmoothnessSlider" Label="Smoothness" Minimum="0" Maximum="90" DefaultValue="25" Unit="°"
                                                             ValueChanged="EditorSlider_ValueChanged" />
+                                    <TextBlock Text="Limit brightness by" Margin="0,8,0,4" />
+                                    <UniformGrid Classes="segments" Rows="1" ColumnSpacing="4" Margin="0,0,0,4">
+                                        <ToggleButton x:Name="LimitByLightnessButton" Content="Lightness" IsChecked="True" Click="LimitBy_Click"
+                                                      ToolTip.Tip="HSL lightness, (max + min) / 2: any fully saturated colour counts as 50%" />
+                                        <ToggleButton x:Name="LimitByLuminanceButton" Content="Luminance" Click="LimitBy_Click"
+                                                      ToolTip.Tip="How bright the colour looks: dim blue counts as dark and bright green as light" />
+                                    </UniformGrid>
                                     <controls:LabeledSlider x:Name="LightnessMinSlider" Label="Darkest" Minimum="0" Maximum="100" DefaultValue="0" Unit="%"
                                                             ValueChanged="EditorSlider_ValueChanged" />
                                     <controls:LabeledSlider x:Name="LightnessMaxSlider" Label="Brightest" Minimum="0" Maximum="100" DefaultValue="100" Unit="%"
@@ -335,10 +445,12 @@
         </Grid>
 
         <!-- Status bar -->
-        <Grid Grid.Row="2" Margin="12,4" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="24">
+        <Grid Grid.Row="2" Margin="12,4" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="24">
             <TextBlock x:Name="FileInfoText" Classes="caption" TextTrimming="CharacterEllipsis" />
-            <TextBlock x:Name="PixelInfoText" Grid.Column="1" Classes="caption" FontFamily="Consolas, Menlo, monospace" />
-            <TextBlock x:Name="ZoomText" Grid.Column="2" Classes="caption" />
+            <TextBlock x:Name="ClippingInfoText" Grid.Column="1" Classes="caption" IsVisible="False"
+                       ToolTip.Tip="The share of pixels the edits push to black (blue in the overlay) or to white (red). Channels already black or white in the original, and the stars, are not counted." />
+            <TextBlock x:Name="PixelInfoText" Grid.Column="2" Classes="caption" FontFamily="Consolas, Menlo, monospace" />
+            <TextBlock x:Name="ZoomText" Grid.Column="3" Classes="caption" />
         </Grid>
     </Grid>
 </Window>

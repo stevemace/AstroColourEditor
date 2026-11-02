@@ -39,6 +39,9 @@ public sealed class FitsFile : IAstroImage
     /// <summary>True when the file stores its first row at the bottom; planes are kept top row first.</summary>
     public bool BottomUp { get; }
 
+    /// <summary>FITS pixel rows count from the first row stored, which is the bottom one in a bottom-up file.</summary>
+    public bool WcsFirstRowAtBottom => BottomUp;
+
     // Everything before the image HDU's header, and everything after its data, kept byte for byte.
     private readonly byte[] _before;
     private readonly byte[] _after;
@@ -308,27 +311,32 @@ public sealed class FitsFile : IAstroImage
 
     /// <summary>
     /// Writes the file, replacing the image's pixels with <paramref name="planes"/> (or the current
-    /// <see cref="Planes"/>) turned by <paramref name="rotation"/>. The sample format, scaling and row
-    /// order are kept; checksums, which would no longer match, are removed, as is the WCS of a rotated image.
+    /// <see cref="Planes"/>) cropped to <paramref name="crop"/> and turned by <paramref name="rotation"/>. The sample
+    /// format, scaling and row order are kept; checksums, which would no longer match, are removed, as is the WCS of
+    /// a rotated image. A cropped image keeps its WCS, with CRPIX1/2 moved to match.
     /// </summary>
-    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None)
+    public void Save(string path, float[][]? planes = null, Rotation rotation = Rotation.None, CropRect? crop = null)
     {
         planes ??= Planes;
         if (planes.Length != Channels || planes.Any(p => p.Length != PixelCount))
             throw new ArgumentException("Plane data does not match the image geometry.", nameof(planes));
-        planes = rotation.Apply(planes, Width, Height);
-        var (width, height) = rotation.Size(Width, Height);
+        var geometry = SaveGeometry.Of(Width, Height, rotation, crop);
+        planes = geometry.Apply(planes);
+        var (width, height) = (geometry.Width, geometry.Height);
+        var shift = geometry.Crop is { } c ? Wcs.CropShift(c, Height, BottomUp) : (0, 0);
 
         var header = new StringBuilder();
         foreach (var card in _cards)
         {
             string key = card[..8].TrimEnd();
             if (key is "CHECKSUM" or "DATASUM") continue;
-            if (rotation != Rotation.None && card[8..10] == "= " && RotationExtensions.IsWcsKeyword(key)) continue;
+            bool valueCard = card[8..10] == "= ";
+            if (rotation != Rotation.None && valueCard && RotationExtensions.IsWcsKeyword(key)) continue;
             header.Append(key switch
             {
-                "NAXIS1" when rotation.SwapsAxes() => IntegerCard(card, width),
-                "NAXIS2" when rotation.SwapsAxes() => IntegerCard(card, height),
+                "NAXIS1" when width != Width => IntegerCard(card, width),
+                "NAXIS2" when height != Height => IntegerCard(card, height),
+                _ when valueCard && geometry.Crop is not null && Wcs.CrpixAxis(key) != 0 => CroppedCard(card, shift),
                 _ => card,
             });
         }
@@ -350,6 +358,14 @@ public sealed class FitsFile : IAstroImage
         File.Move(tempPath, fullPath, overwrite: true);
     }
 
+    /// <summary>A CRPIX card with its value moved by a crop, keeping its comment; unchanged if it cannot be rewritten.</summary>
+    private static string CroppedCard(string card, (int X, int Y) shift)
+    {
+        var keyword = FitsKeyword.Parse(card);
+        var moved = Wcs.Crop(keyword, shift);
+        return moved == keyword ? card : moved.ToCard() ?? card;
+    }
+
     /// <summary>A fixed-format integer card with the same keyword and comment as <paramref name="card"/>.</summary>
     private static string IntegerCard(string card, int value)
     {
@@ -360,7 +376,7 @@ public sealed class FitsFile : IAstroImage
 
     private byte[] EncodeSamples(float[][] planes, int width, int height)
     {
-        int n = PixelCount;
+        int n = width * height;
         int bps = Math.Abs(Bitpix) / 8;
         var data = new byte[(long)n * Channels * bps];
         double range = _high - _low;
