@@ -1,7 +1,6 @@
 # Astro Colour Editor
 
-A desktop tool for selective colour editing of `.xisf`, FITS, TIFF and camera raw images, modelled on
-Capture One's colour editor. It runs on Windows and macOS (Avalonia UI).
+A desktop tool for selective colour editing of `.xisf`, FITS, TIFF and camera raw images. It runs on Windows and macOS (Avalonia UI).
 
 ## Using it
 
