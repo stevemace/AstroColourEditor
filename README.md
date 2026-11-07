@@ -164,6 +164,16 @@ To produce a self-contained Windows folder (`publish/win-x64`) you can copy to a
 dotnet publish src/AstroColour.Desktop -c Release -r win-x64 --self-contained -o publish/win-x64
 ```
 
+Or to produce a single `AstroColourEditor.exe` (about 50 MB) in `publish/win-x64-single`, with .NET and the native
+libraries packed inside:
+
+```
+dotnet publish src/AstroColour.Desktop -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish/win-x64-single
+```
+
+Only the `.exe` is needed; the `.pdb` files written beside it are debug symbols. On first run the native libraries are
+unpacked to `%TEMP%\.net\AstroColourEditor`.
+
 To make a Mac app, run this on a Mac:
 
 ```
