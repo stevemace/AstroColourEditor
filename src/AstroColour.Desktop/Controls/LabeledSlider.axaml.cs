@@ -16,9 +16,26 @@ public partial class LabeledSlider : UserControl
         UpdateValueText();
         // The slider's thumb and track handle presses themselves, so watch for the double-click on the way down.
         Slider.AddHandler(PointerPressedEvent, Slider_PointerPressed, RoutingStrategies.Tunnel);
+        Slider.AddHandler(PointerReleasedEvent, (_, _) => EndDrag(), RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
+        Slider.AddHandler(PointerCaptureLostEvent, (_, _) => EndDrag(), RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
     public event EventHandler? ValueChanged;
+
+    /// <summary>Raised when the slider is pressed, to be dragged or clicked.</summary>
+    public event EventHandler? DragStarted;
+
+    /// <summary>Raised when the slider is let go.</summary>
+    public event EventHandler? DragCompleted;
+
+    private bool _dragging;
+
+    private void EndDrag()
+    {
+        if (!_dragging) return;
+        _dragging = false;
+        DragCompleted?.Invoke(this, EventArgs.Empty);
+    }
 
     public string? Label
     {
@@ -91,7 +108,16 @@ public partial class LabeledSlider : UserControl
 
     private void Slider_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.ClickCount != 2 || !e.GetCurrentPoint(Slider).Properties.IsLeftButtonPressed) return;
+        if (!e.GetCurrentPoint(Slider).Properties.IsLeftButtonPressed) return;
+        if (e.ClickCount != 2)
+        {
+            if (!_dragging)
+            {
+                _dragging = true;
+                DragStarted?.Invoke(this, EventArgs.Empty);
+            }
+            return;
+        }
         Value = DefaultValue;
         e.Handled = true; // don't start a drag from the reset value
     }

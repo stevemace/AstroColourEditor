@@ -23,7 +23,7 @@ public sealed class AdjustmentItem : INotifyPropertyChanged
     /// <summary>Raised when the user toggles the entry on or off.</summary>
     public event EventHandler? ActiveChanged;
 
-    public string Name => $"{ColourMath.HueName(Model.TargetHue)}  {Math.Round(Model.TargetHue)}°";
+    public string Name => $"{ColourMath.HueName(Model.TargetHue)}  {Math.Round(Model.TargetHue) % 360}°";
 
     public string Summary =>
         (Model.HasHslEdits, Model.Curves.IsIdentity) switch

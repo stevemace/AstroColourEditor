@@ -92,8 +92,14 @@ public partial class MainWindow : Window
         InitializeComponent();
         RestorePlacement();
         PositionChanged += (_, _) => TrackRestoredBounds();
+        Deactivated += (_, _) => SetMaskKeyHeld(false); // the key-up would go to another window
         AdjustmentList.ItemsSource = _adjustments;
-        TargetHueSlider.GradientBrush = HueRamp(0, 360);
+        HueRangeBand.Ramp = HueRamp(0, 360);
+        HueRangeBand.HistogramColour = h => Hsl((float)h, 0.8f, 0.5f);
+        BrightnessRangeBand.Ramp = Ramp(Colors.Black, Colors.White);
+        PickerHint.Text = "Turn on the picker, then click a colour in the image to add it to the list. " +
+            $"Shift-click more colours to add them to the selected one, or {(OperatingSystem.IsMacOS() ? "Option" : "Alt")}-click to leave them out. " +
+            "Drag to pan, scroll to zoom.";
         GlobalSaturationSlider.GradientBrush = Ramp(Hsl(0, 0, 0.5f), Hsl(0, 1, 0.5f));
         ImageCurves.Curves = _curves;
         HueCurves.Curves = _hueCurves;
@@ -240,6 +246,7 @@ public partial class MainWindow : Window
             ImageCurves.ShowChannel(CurveChannel.Rgb);
             HueCurves.Refresh();
             HueCurves.Histogram = hues;
+            HueRangeBand.Histogram = hues;
             _channelStatistics = statistics;
             SetNarrowband(new NarrowbandSettings());
             SetGlobalSaturation(0);
@@ -248,7 +255,6 @@ public partial class MainWindow : Window
             _crop = null;
             _cropEditing = false;
             CropButton.IsChecked = false;
-            ShowMaskToggle.IsChecked = false;
             CompareButton.IsChecked = false;
             if (!image.IsColour) EditorTabs.SelectedItem = GlobalTab;
 
@@ -258,6 +264,7 @@ public partial class MainWindow : Window
             _proxyPending = false;
             SetStars(null);
             SetStarBrightness(1);
+            SetShowStars(true);
             PreviewImage.Source = _full.Bitmap;
             BeforeImage.Source = null;
             SetZoom(1 / RenderScaling);
@@ -346,7 +353,7 @@ public partial class MainWindow : Window
             var hueCurves = _hueCurves.Clone();
             var saturation = GlobalSaturation;
             var removePurple = RemovePurple;
-            var stars = _stars is null ? null : new StarLayer(_stars.Full, StarBrightness);
+            var stars = _stars is null || !ShowStars ? null : new StarLayer(_stars.Full, StarBrightness);
             var rotation = _rotation;
             var crop = _crop;
             var narrowband = Narrowband;
@@ -507,9 +514,9 @@ public partial class MainWindow : Window
                 var removePurple = RemovePurple;
                 var narrowband = Narrowband;
                 var mask = Selected?.Model.Clone();
-                var stars = layer.Stars is null ? null : new StarLayer(layer.Stars, StarBrightness);
+                var stars = layer.Stars is null || !ShowStars ? null : new StarLayer(layer.Stars, StarBrightness);
                 var mode = CompareButton.IsChecked == true ? PreviewMode.Original
-                    : ShowMaskToggle.IsChecked == true && mask is not null && ColourTab.IsSelected ? PreviewMode.Mask
+                    : ShowingMask && mask is not null ? PreviewMode.Mask
                     : PreviewMode.Adjusted;
 
                 bool showClipping = ClippingButton.IsChecked == true;
@@ -774,8 +781,6 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void ShowMaskToggle_Toggled(object? sender, RoutedEventArgs e) => RequestRender();
-
     private void EditorTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         // Selection changes in the adjustment list bubble up to here too.
@@ -786,7 +791,7 @@ public partial class MainWindow : Window
             UpdateCursor();
         }
         // The selected colour range is only shown while its tab is open.
-        if (ShowMaskToggle.IsChecked == true) RequestRender();
+        if (_maskKeyHeld || _selectionDragging) RequestRender();
     }
 
     // ---------------------------------------------------------- colour editor
@@ -850,7 +855,7 @@ public partial class MainWindow : Window
     private void AdjustmentList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         LoadEditor(Selected);
-        if (ShowMaskToggle.IsChecked == true) RequestRender();
+        if (ShowingMask) RequestRender();
     }
 
     private void LoadEditor(AdjustmentItem? item)
@@ -860,20 +865,14 @@ public partial class MainWindow : Window
 
         _suppressEditorEvents = true;
         var m = item.Model;
-        TargetHueSlider.Value = Math.Round(m.TargetHue) % 360;
-        RangeSlider.Value = m.Range;
-        SmoothnessSlider.Value = m.Smoothness;
         ProtectSlider.Value = m.NeutralProtection;
-        LightnessMinSlider.Value = m.LightnessMin;
-        LightnessMaxSlider.Value = m.LightnessMax;
-        LightnessSmoothnessSlider.Value = m.LightnessSmoothness;
         HueShiftSlider.Value = m.HueShift;
         SaturationSlider.Value = m.Saturation;
         LightnessSlider.Value = m.Lightness;
-        TargetHueSlider.DefaultValue = Math.Round(ColourMath.Hue(m.SampleR, m.SampleG, m.SampleB)) % 360;
-        LimitByLightnessButton.IsChecked = m.LimitBy == BrightnessMeasure.Lightness;
-        LimitByLuminanceButton.IsChecked = m.LimitBy == BrightnessMeasure.Luminance;
         _suppressEditorEvents = false;
+        // Keep the refinements out of the way unless this colour uses them.
+        RefineExpander.IsExpanded = HasRefinements(m);
+        ShowSelectionRange(m);
         UpdateSliderRamps();
 
         ColourCurves.Curves = m.Curves;
@@ -912,49 +911,192 @@ public partial class MainWindow : Window
         RequestRender(interactive);
     }
 
-    private void LimitBy_Click(object? sender, RoutedEventArgs e)
-    {
-        var measure = sender == LimitByLuminanceButton ? BrightnessMeasure.Luminance : BrightnessMeasure.Lightness;
-        LimitByLightnessButton.IsChecked = measure == BrightnessMeasure.Lightness;
-        LimitByLuminanceButton.IsChecked = measure == BrightnessMeasure.Luminance;
-        if (Selected is not { } item || item.Model.LimitBy == measure) return;
-        item.Model.LimitBy = measure;
-        UpdateSliderRamps();
-        UpdateSelectionHistogram();
-        RecordEdit(changesImage: item.Model.HasEdits && item.Model.Enabled);
-        RequestRender();
-    }
-
     private void EditorSlider_ValueChanged(object? sender, EventArgs e)
     {
         if (_suppressEditorEvents || Selected is not { } item) return;
 
-        // Keep the lightness limits in order by pushing the other one along.
-        _suppressEditorEvents = true;
-        if (ReferenceEquals(sender, LightnessMinSlider) && LightnessMaxSlider.Value < LightnessMinSlider.Value)
-            LightnessMaxSlider.Value = LightnessMinSlider.Value;
-        else if (ReferenceEquals(sender, LightnessMaxSlider) && LightnessMinSlider.Value > LightnessMaxSlider.Value)
-            LightnessMinSlider.Value = LightnessMaxSlider.Value;
-        _suppressEditorEvents = false;
-
         var m = item.Model;
         bool hadEdits = m.HasEdits;
-        m.TargetHue = (float)TargetHueSlider.Value;
-        m.Range = (float)RangeSlider.Value;
-        m.Smoothness = (float)SmoothnessSlider.Value;
         m.NeutralProtection = (float)ProtectSlider.Value;
-        m.LightnessMin = (float)LightnessMinSlider.Value;
-        m.LightnessMax = (float)LightnessMaxSlider.Value;
-        m.LightnessSmoothness = (float)LightnessSmoothnessSlider.Value;
         m.HueShift = (float)HueShiftSlider.Value;
         m.Saturation = (float)SaturationSlider.Value;
         m.Lightness = (float)LightnessSlider.Value;
         item.Refresh();
 
-        if (ReferenceEquals(sender, TargetHueSlider)) UpdateSliderRamps();
+        if (ReferenceEquals(sender, ProtectSlider)) UpdateBrightnessHistogram();
         if (!HslEditor.IsVisible) UpdateSelectionHistogram();
         RecordEdit((sender, item), changesImage: (hadEdits || m.HasEdits) && m.Enabled);
         RequestRender(interactive: true);
+    }
+
+    // ------------------------------------------------------ selected colours
+
+    /// <summary>Whether the selected colours are shown in place of the image: while M is held or they are being changed.</summary>
+    private bool ShowingMask => (_maskKeyHeld || _selectionDragging) && ColourTab.IsSelected;
+
+    private bool _maskKeyHeld;
+    private bool _selectionDragging;
+
+    private void SelectionDrag_Started(object? sender, EventArgs e)
+    {
+        _selectionDragging = true;
+        RequestRender(interactive: true);
+    }
+
+    private void SelectionDrag_Completed(object? sender, EventArgs e)
+    {
+        if (!_selectionDragging) return;
+        _selectionDragging = false;
+        RequestRender();
+    }
+
+    private void SetMaskKeyHeld(bool held)
+    {
+        if (_maskKeyHeld == held) return;
+        _maskKeyHeld = held;
+        if (Selected is not null) RequestRender();
+    }
+
+    private static bool HasRefinements(ColourAdjustment m) =>
+        m.LightnessMin > 0 || m.LightnessMax < 100 || m.NeutralProtection != new ColourAdjustment().NeutralProtection;
+
+    /// <summary>Shows a colour's hue and brightness range on the two bands, with their readouts.</summary>
+    private void ShowSelectionRange(ColourAdjustment m)
+    {
+        HueRangeBand.SetRange(m.TargetHue - m.Range, m.TargetHue + m.Range, m.Smoothness);
+        BrightnessRangeBand.SetRange(m.LightnessMin, m.LightnessMax, m.LightnessSmoothness);
+        UpdateRangeTexts(m);
+        UpdateBrightnessHistogram();
+    }
+
+    private void UpdateRangeTexts(ColourAdjustment m)
+    {
+        HueRangeText.Text = $"{ColourMath.HueName(m.TargetHue)} {Math.Round(m.TargetHue) % 360:0}°    " +
+            $"Width ±{m.Range:0}°    Feather {m.Smoothness:0}°";
+        BrightnessRangeText.Text = $"Darkest {m.LightnessMin:0}%    Brightest {m.LightnessMax:0}%    Feather {m.LightnessSmoothness:0}%";
+    }
+
+    private void HueRangeBand_RangeChanged(object? sender, bool interactive)
+    {
+        if (Selected is not { } item) return;
+        var m = item.Model;
+        bool hadEdits = m.HasEdits;
+        m.TargetHue = ColourAdjustment.WrapHue((float)((HueRangeBand.Low + HueRangeBand.High) / 2));
+        m.Range = (float)((HueRangeBand.High - HueRangeBand.Low) / 2);
+        m.Smoothness = (float)HueRangeBand.Feather;
+        UpdateSliderRamps();
+        if (!interactive) UpdateBrightnessHistogram(); // too slow to follow a drag
+        SelectionRangeChanged(item, hadEdits, interactive);
+    }
+
+    private void BrightnessRangeBand_RangeChanged(object? sender, bool interactive)
+    {
+        if (Selected is not { } item) return;
+        var m = item.Model;
+        bool hadEdits = m.HasEdits;
+        m.LightnessMin = (float)Math.Round(BrightnessRangeBand.Low, 1);
+        m.LightnessMax = (float)Math.Round(BrightnessRangeBand.High, 1);
+        m.LightnessSmoothness = (float)Math.Round(BrightnessRangeBand.Feather, 1);
+        SelectionRangeChanged(item, hadEdits, interactive);
+    }
+
+    private void SelectionRangeChanged(AdjustmentItem item, bool hadEdits, bool interactive)
+    {
+        var m = item.Model;
+        item.Refresh();
+        UpdateRangeTexts(m);
+        if (!HslEditor.IsVisible) UpdateSelectionHistogram();
+        RecordEdit((HueRangeBand, item), changesImage: (hadEdits || m.HasEdits) && m.Enabled, sealStep: !interactive);
+        RequestRender(interactive);
+    }
+
+    private void HueRangeBand_ResetRequested(object? sender, EventArgs e)
+    {
+        if (Selected is not { } item) return;
+        var m = item.Model;
+        var defaults = new ColourAdjustment();
+        bool hadEdits = m.HasEdits;
+        m.TargetHue = ColourMath.Hue(m.SampleR, m.SampleG, m.SampleB);
+        m.Range = defaults.Range;
+        m.Smoothness = defaults.Smoothness;
+        ShowSelectionRange(m);
+        UpdateSliderRamps();
+        SelectionRangeChanged(item, hadEdits, interactive: false);
+    }
+
+    private void BrightnessRangeBand_ResetRequested(object? sender, EventArgs e)
+    {
+        if (Selected is not { } item) return;
+        var m = item.Model;
+        var defaults = new ColourAdjustment();
+        bool hadEdits = m.HasEdits;
+        m.LightnessMin = defaults.LightnessMin;
+        m.LightnessMax = defaults.LightnessMax;
+        m.LightnessSmoothness = defaults.LightnessSmoothness;
+        ShowSelectionRange(m);
+        SelectionRangeChanged(item, hadEdits, interactive: false);
+    }
+
+    private void RefineExpander_Expanded(object? sender, RoutedEventArgs e) => UpdateBrightnessHistogram();
+
+    /// <summary>
+    /// Shows how bright the colours of the selected hue are behind the brightness band, ignoring the brightness
+    /// limits themselves so that what they leave out still shows.
+    /// </summary>
+    private void UpdateBrightnessHistogram()
+    {
+        if (!RefineExpander.IsExpanded || Selected is not { } item || (_proxy ?? _full) is not { } layer) return;
+        var hues = item.Model.Clone();
+        hues.LightnessMin = 0;
+        hues.LightnessMax = 100;
+        BrightnessRangeBand.Histogram = CurveSet.Histogram(layer.Source, bins: 100, selection: hues, baseAdjustments: BaseAdjustments)[0];
+    }
+
+    /// <summary>
+    /// Shift-click widens the selected colour to take in the colour clicked; Alt-click (Option on macOS) narrows
+    /// it to leave that colour out.
+    /// </summary>
+    private void RefineSelection(Point imagePoint, bool include)
+    {
+        if (_full is null || Selected is not { } item) return;
+        var source = _full.Source;
+        int x = (int)(imagePoint.X / _zoom), y = (int)(imagePoint.Y / _zoom);
+        if (x < 0 || y < 0 || x >= source.Width || y >= source.Height) return;
+
+        var (r, g, b) = ColourProcessor.Sample(source, x, y, radius: 3);
+        BaseAdjustments?.Apply(ref r, ref g, ref b); // judge the colour as the colour editor sees it
+        r = Math.Clamp(r, 0f, 1f);
+        g = Math.Clamp(g, 0f, 1f);
+        b = Math.Clamp(b, 0f, 1f);
+        ColourMath.RgbToHsl(r, g, b, out float hue, out _, out _, out float chroma);
+        if (chroma < 0.01f)
+        {
+            ShowMessage(InfoBarSeverity.Informational, "That spot is neutral",
+                "The area you clicked is almost grey, so it has no hue to add or leave out.");
+            return;
+        }
+
+        var m = item.Model;
+        bool hadEdits = m.HasEdits;
+        if (include ? !m.Include(hue, chroma, ColourMath.Luminance(r, g, b)) : !m.Exclude(hue))
+        {
+            if (include)
+                ShowMessage(InfoBarSeverity.Informational, "Already selected", "That colour is already fully selected.");
+            else if (ColourAdjustment.HueDistance(hue, m.TargetHue) >= m.Range + m.Smoothness)
+                ShowMessage(InfoBarSeverity.Informational, "Already left out", "That colour is not selected.");
+            else
+                ShowMessage(InfoBarSeverity.Informational, "Too near the middle",
+                    "That colour is at the heart of the selection, so leaving it out would leave nothing. Pick it as a new colour instead.");
+            return;
+        }
+
+        if (HasRefinements(m)) RefineExpander.IsExpanded = true;
+        ShowSelectionRange(m);
+        UpdateSliderRamps();
+        item.Refresh();
+        if (!HslEditor.IsVisible) UpdateSelectionHistogram();
+        RecordEdit(changesImage: (hadEdits || m.HasEdits) && m.Enabled);
+        RequestRender();
     }
 
     private void ResetAdjustment_Click(object? sender, RoutedEventArgs e)
@@ -980,14 +1122,11 @@ public partial class MainWindow : Window
 
     private void UpdateSliderRamps()
     {
-        float h = (float)TargetHueSlider.Value;
+        if (Selected is not { } item) return;
+        float h = item.Model.TargetHue;
         HueShiftSlider.GradientBrush = HueRamp(h - 90, h + 90);
         SaturationSlider.GradientBrush = Ramp(Hsl(h, 0, 0.5f), Hsl(h, 1, 0.5f));
         LightnessSlider.GradientBrush = Ramp(Hsl(h, 0.8f, 0.1f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 0.9f));
-        // Luminance is how bright a colour looks, so its ramp is grey.
-        LightnessMinSlider.GradientBrush = LightnessMaxSlider.GradientBrush = LimitByLuminanceButton.IsChecked == true
-            ? Ramp(Colors.Black, Colors.White)
-            : Ramp(Hsl(h, 0.8f, 0f), Hsl(h, 0.8f, 0.5f), Hsl(h, 0.8f, 1f));
     }
 
     private static LinearGradientBrush HueRamp(float from, float to)
@@ -1033,6 +1172,7 @@ public partial class MainWindow : Window
     {
         RecordEdit(HueCurves, sealStep: !interactive);
         UpdateSelectionHistogram();
+        QueueHueHistogram();
         RequestRender(interactive);
     }
 
@@ -1048,6 +1188,8 @@ public partial class MainWindow : Window
         if ((_proxy ?? _full) is not { } layer || _image is not { IsColour: true }) return;
         HueCurves.Histogram = HueCurveSet.Histogram(layer.Source, baseAdjustments:
             Core.Colour.BaseAdjustments.Create(Narrowband, new CurveLookup(_curves), GlobalSaturation, RemovePurple));
+        // The colour editor sees the image after the hue curves too.
+        HueRangeBand.Histogram = HueCurveSet.Histogram(layer.Source, baseAdjustments: BaseAdjustments);
     }
 
     private float GlobalSaturation => (float)GlobalSaturationSlider.Value;
@@ -1162,6 +1304,8 @@ public partial class MainWindow : Window
 
     private float StarBrightness => (float)StarBrightnessSlider.Value;
 
+    private bool ShowStars => ShowStarsCheckBox.IsChecked == true;
+
     private void LoadStars_Click(object? sender, RoutedEventArgs e) => _ = RunFileActionAsync(async () =>
     {
         if (_image is null) return;
@@ -1229,6 +1373,20 @@ public partial class MainWindow : Window
         _suppressEditorEvents = true;
         StarBrightnessSlider.Value = value;
         _suppressEditorEvents = false;
+    }
+
+    private void SetShowStars(bool value)
+    {
+        _suppressEditorEvents = true;
+        ShowStarsCheckBox.IsChecked = value;
+        _suppressEditorEvents = false;
+    }
+
+    private void ShowStarsCheckBox_Changed(object? sender, RoutedEventArgs e)
+    {
+        if (_suppressEditorEvents || _restoring) return;
+        RecordEdit(changesImage: _stars is not null);
+        RequestRender();
     }
 
     private void StarBrightnessSlider_ValueChanged(object? sender, EventArgs e)
@@ -1363,6 +1521,14 @@ public partial class MainWindow : Window
         if (_image is null) return;
         var properties = e.GetCurrentPoint(ImageHost).Properties;
 
+        if (properties.IsLeftButtonPressed && e.KeyModifiers is KeyModifiers.Shift or KeyModifiers.Alt
+            && ColourTab.IsSelected && ColourPanel.IsEnabled && Selected is not null && !_cropEditing)
+        {
+            RefineSelection(e.GetPosition(PreviewImage), include: e.KeyModifiers == KeyModifiers.Shift);
+            e.Handled = true;
+            return;
+        }
+
         if (PickerButton.IsChecked == true && properties.IsLeftButtonPressed)
         {
             PickColour(e.GetPosition(PreviewImage));
@@ -1444,6 +1610,9 @@ public partial class MainWindow : Window
                 case Key.P when ColourPanel.IsEnabled:
                     TogglePicker();
                     break;
+                case Key.M when ColourPanel.IsEnabled:
+                    SetMaskKeyHeld(true);
+                    break;
                 default:
                     return;
             }
@@ -1486,6 +1655,12 @@ public partial class MainWindow : Window
                 return;
         }
         e.Handled = true;
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (e.Key == Key.M) SetMaskKeyHeld(false);
     }
 
     private void ToggleCompare()
@@ -1609,6 +1784,7 @@ public partial class MainWindow : Window
         _narrowband,
         _stars,
         StarBrightness,
+        ShowStars,
         _rotation,
         _crop);
 
@@ -1647,6 +1823,7 @@ public partial class MainWindow : Window
             SetNarrowband(state.Narrowband);
             SetStars(state.Stars);
             SetStarBrightness(state.StarBrightness);
+            SetShowStars(state.ShowStars);
             _crop = state.Crop;
             SetRotation(state.Rotation);
 
@@ -1769,9 +1946,13 @@ public partial class MainWindow : Window
         Title = _path is null ? AppTitle : $"{Path.GetFileName(_path)}{(IsDirty ? " •" : "")} — {AppTitle}";
         FileInfoText.Text = _image is null
             ? ""
-            : $"{_path}    {_image.Width} × {_image.Height}{(_crop is { } c ? $" (cropped to {c.Width} × {c.Height})" : "")}    {_image.Channels} ch {_image.ColorSpace}    {_image.SampleFormatName}";
+            : $"{_path}{ModifiedText(_path)}    {_image.Width} × {_image.Height}{(_crop is { } c ? $" (cropped to {c.Width} × {c.Height})" : "")}    {_image.Channels} ch {_image.ColorSpace}    {_image.SampleFormatName}";
         UpdateZoomText();
     }
+
+    /// <summary>The file's last-modified date and time for the status bar, read live so it follows saves.</summary>
+    private static string ModifiedText(string? path) =>
+        path is not null && File.Exists(path) ? $"    Modified {File.GetLastWriteTime(path):g}" : "";
 
     private void SetBusy(string message)
     {

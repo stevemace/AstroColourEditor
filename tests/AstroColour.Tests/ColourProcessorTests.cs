@@ -155,24 +155,66 @@ public class ColourProcessorTests
     }
 
     [Fact]
-    public void Luminance_limits_judge_brightness_as_it_looks()
+    public void Brightness_limits_judge_brightness_as_it_looks()
     {
-        // Saturated blue has HSL lightness 0.5 but luminance of only about 0.07.
-        var byLightness = new ColourAdjustment { TargetHue = 240, NeutralProtection = 0, LightnessMax = 30, LightnessSmoothness = 0, Saturation = -100 };
-        var byLuminance = byLightness.Clone();
-        byLuminance.LimitBy = BrightnessMeasure.Luminance;
-
+        // Saturated blue has HSL lightness 0.5 but luminance of only about 0.07, so it counts as dark.
+        var dark = new ColourAdjustment { TargetHue = 240, NeutralProtection = 0, LightnessMax = 30, LightnessSmoothness = 0, Saturation = -100 };
         float r = 0f, g = 0f, b = 1f;
-        Assert.False(new AdjustmentSet([byLightness]).Adjust(ref r, ref g, ref b));
-        Assert.True(new AdjustmentSet([byLuminance]).Adjust(ref r, ref g, ref b));
+        Assert.True(new AdjustmentSet([dark]).Adjust(ref r, ref g, ref b));
+        Assert.Equal(1f, new AdjustmentSet([dark]).WeightOfColour(0f, 0f, 1f));
 
-        Assert.Equal(0f, new AdjustmentSet([byLightness]).WeightOfColour(0f, 0f, 1f));
-        Assert.Equal(1f, new AdjustmentSet([byLuminance]).WeightOfColour(0f, 0f, 1f));
+        var light = new ColourAdjustment { TargetHue = 240, NeutralProtection = 0, LightnessMin = 30, LightnessSmoothness = 0, Saturation = -100 };
+        Assert.Equal(0f, new AdjustmentSet([light]).WeightOfColour(0f, 0f, 1f));
+    }
 
-        // Each adjustment in a set uses its own measure.
-        var both = new AdjustmentSet([byLightness, byLuminance]);
-        float r2 = 0f, g2 = 0f, b2 = 1f;
-        Assert.True(both.Adjust(ref r2, ref g2, ref b2));
+    [Fact]
+    public void Include_widens_the_range_on_the_colours_side()
+    {
+        var a = new ColourAdjustment { TargetHue = 200, Range = 20, Smoothness = 25 };
+        Assert.False(a.Include(210, 0.5f, 0.5f)); // already selected
+
+        Assert.True(a.Include(240, 0.5f, 0.5f));
+        Assert.Equal(1f, a.Weight(240, 0.5f, 0.5f));
+        Assert.Equal(1f, a.Weight(180, 0.5f, 0.5f)); // the far edge stays put
+        Assert.Equal(210, a.TargetHue, 0.01f);
+        Assert.Equal(30, a.Range, 0.01f);
+
+        // Across 0°, and never wider than half the circle.
+        var red = new ColourAdjustment { TargetHue = 10, Range = 20 };
+        Assert.True(red.Include(340, 0.5f, 0.5f));
+        Assert.Equal(1f, red.Weight(340, 0.5f, 0.5f));
+        Assert.True(red.Include(170, 0.5f, 0.5f));
+        Assert.Equal(ColourAdjustment.MaxRange, red.Range, 0.01f);
+    }
+
+    [Fact]
+    public void Include_makes_room_in_the_brightness_limits_and_neutral_protection()
+    {
+        var a = new ColourAdjustment { TargetHue = 0, LightnessMin = 40, LightnessMax = 60, NeutralProtection = 20 };
+        Assert.True(a.Include(0, 0.1f, 0.2f));
+        Assert.Equal(1f, a.Weight(0, 0.1f, 0.2f));
+        Assert.Equal(60, a.LightnessMax);
+    }
+
+    [Fact]
+    public void Exclude_narrows_the_range_from_the_hues_side()
+    {
+        var a = new ColourAdjustment { TargetHue = 200, Range = 20, Smoothness = 25 };
+        Assert.False(a.Exclude(260)); // already left out
+
+        Assert.True(a.Exclude(235));
+        Assert.Equal(0f, a.Weight(235, 0.5f, 0.5f));
+        Assert.Equal(1f, a.Weight(180, 0.5f, 0.5f)); // the far edge stays put
+        Assert.True(a.Range >= ColourAdjustment.MinRange);
+
+        // Across 0°.
+        var red = new ColourAdjustment { TargetHue = 5, Range = 20, Smoothness = 25 };
+        Assert.True(red.Exclude(350));
+        Assert.Equal(0f, red.Weight(350, 0.5f, 0.5f));
+        Assert.Equal(1f, red.Weight(25, 0.5f, 0.5f));
+
+        // Nothing would be left of the range.
+        Assert.False(new ColourAdjustment { TargetHue = 0, Range = 1, Smoothness = 0 }.Exclude(0.5f));
     }
 
     [Fact]

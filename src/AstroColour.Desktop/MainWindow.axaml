@@ -328,7 +328,7 @@
                                     </StackPanel>
                                 </ToggleButton>
                                 <TextBlock x:Name="PickerHint" TextWrapping="Wrap" Classes="caption secondary"
-                                           Text="Turn on the picker, then click a colour in the image to add it to the list. Drag to pan, scroll to zoom." />
+                                           />
 
                                 <ListBox x:Name="AdjustmentList" SelectionMode="Single" MaxHeight="240" Background="Transparent"
                                          SelectionChanged="AdjustmentList_SelectionChanged">
@@ -382,30 +382,32 @@
                                                          CurvesChanged="ColourCurves_CurvesChanged"
                                                          Hint="The histogram shows only the selected colours. Curves are blended in by how strongly each pixel is selected, after any HSL changes." />
 
-                                    <TextBlock Text="Selected range" Classes="strong" Margin="0,12,0,4" />
-                                    <ToggleSwitch x:Name="ShowMaskToggle" Content="View selected colour range" OffContent="Off" OnContent="On"
-                                                  IsCheckedChanged="ShowMaskToggle_Toggled" Margin="0,0,0,4" />
-                                    <controls:LabeledSlider x:Name="TargetHueSlider" Label="Centre hue" Minimum="0" Maximum="359" Unit="°"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="RangeSlider" Label="Range" Minimum="1" Maximum="90" DefaultValue="20" Unit="°"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="SmoothnessSlider" Label="Smoothness" Minimum="0" Maximum="90" DefaultValue="25" Unit="°"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <TextBlock Text="Limit brightness by" Margin="0,8,0,4" />
-                                    <UniformGrid Classes="segments" Rows="1" ColumnSpacing="4" Margin="0,0,0,4">
-                                        <ToggleButton x:Name="LimitByLightnessButton" Content="Lightness" IsChecked="True" Click="LimitBy_Click"
-                                                      ToolTip.Tip="HSL lightness, (max + min) / 2: any fully saturated colour counts as 50%" />
-                                        <ToggleButton x:Name="LimitByLuminanceButton" Content="Luminance" Click="LimitBy_Click"
-                                                      ToolTip.Tip="How bright the colour looks: dim blue counts as dark and bright green as light" />
-                                    </UniformGrid>
-                                    <controls:LabeledSlider x:Name="LightnessMinSlider" Label="Darkest" Minimum="0" Maximum="100" DefaultValue="0" Unit="%"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="LightnessMaxSlider" Label="Brightest" Minimum="0" Maximum="100" DefaultValue="100" Unit="%"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="LightnessSmoothnessSlider" Label="Lightness smoothness" Minimum="0" Maximum="50" DefaultValue="10" Unit="%"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
-                                    <controls:LabeledSlider x:Name="ProtectSlider" Label="Protect neutrals" Minimum="0" Maximum="90" DefaultValue="5" Unit="%"
-                                                            ValueChanged="EditorSlider_ValueChanged" />
+                                    <Grid Margin="0,12,0,0">
+                                        <TextBlock Text="Which colours" Classes="strong" VerticalAlignment="Center" />
+                                        <TextBlock Text="Hold M to view" Classes="caption secondary" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   ToolTip.Tip="The selected colours also show while you drag the controls below" />
+                                    </Grid>
+                                    <TextBlock x:Name="HueRangeText" Classes="caption secondary" Margin="0,2,0,0" />
+                                    <controls:RangeBand x:Name="HueRangeBand" Maximum="360" IsCircular="True" MinSpan="2" MaxSpan="180" MaxFeather="90"
+                                                        RangeChanged="HueRangeBand_RangeChanged" DragStarted="SelectionDrag_Started" DragCompleted="SelectionDrag_Completed"
+                                                        ResetRequested="HueRangeBand_ResetRequested"
+                                                        ToolTip.Tip="Drag the middle to move the selection, the top corners to set its width and the bottom corners to feather it. Double-click to reset." />
+
+                                    <Expander x:Name="RefineExpander" Header="Refine brightness and neutrals" HorizontalAlignment="Stretch"
+                                              Margin="0,8,0,0" Expanded="RefineExpander_Expanded">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock x:Name="BrightnessRangeText" Classes="caption secondary" />
+                                            <controls:RangeBand x:Name="BrightnessRangeBand" Maximum="100" MinSpan="0" MaxFeather="50"
+                                                                RangeChanged="BrightnessRangeBand_RangeChanged" DragStarted="SelectionDrag_Started" DragCompleted="SelectionDrag_Completed"
+                                                                ResetRequested="BrightnessRangeBand_ResetRequested"
+                                                                ToolTip.Tip="Limit the selection to colours this bright, judged as they look. Drag the top corners to set the darkest and brightest, the bottom corners to feather them. Double-click to reset." />
+                                            <controls:LabeledSlider x:Name="ProtectSlider" Label="Protect neutrals" Minimum="0" Maximum="90" DefaultValue="5" Unit="%"
+                                                                    ValueChanged="EditorSlider_ValueChanged"
+                                                                    DragStarted="SelectionDrag_Started" DragCompleted="SelectionDrag_Completed" />
+                                            <TextBlock TextWrapping="Wrap" Classes="caption secondary"
+                                                       Text="Protect neutrals leaves greyish colours alone, such as the background and white stars." />
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
@@ -433,6 +435,9 @@
                                                   Data="M2,3.5 H12 M5,3.5 V1.5 H9 V3.5 M3.5,3.5 L4.2,12.5 H9.8 L10.5,3.5" />
                                         </Button>
                                     </Grid>
+                                    <CheckBox x:Name="ShowStarsCheckBox" Content="Show stars" IsChecked="True"
+                                              IsCheckedChanged="ShowStarsCheckBox_Changed"
+                                              ToolTip.Tip="Turn the stars off to see and save the starless image; the stars image stays loaded" />
                                     <controls:LabeledSlider x:Name="StarBrightnessSlider" Label="Star brightness (x)" Minimum="0" Maximum="1"
                                                             Step="0.01" Decimals="2" DefaultValue="1" Value="1"
                                                             ValueChanged="StarBrightnessSlider_ValueChanged" />

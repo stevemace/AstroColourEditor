@@ -24,6 +24,7 @@ internal sealed record EditState(
     NarrowbandSettings Narrowband,
     StarsState? Stars,
     float StarBrightness,
+    bool ShowStars,
     Rotation Rotation,
     CropRect? Crop)
 {
