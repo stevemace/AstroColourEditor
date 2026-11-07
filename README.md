@@ -2,7 +2,7 @@
 
 A desktop tool for selective colour editing of `.xisf`, FITS, TIFF and camera raw images. It runs on Windows and macOS (Avalonia UI).
 
-![Astro Colour Editor editing the yellows of an SHO image of the Elephant's Trunk nebula](docs/screenshot.jpg)
+![Astro Colour Editor editing the yellows of an SHO image of the Elephant's Trunk nebula, split before and after](docs/screenshot.jpg)
 
 ## Using it
 
