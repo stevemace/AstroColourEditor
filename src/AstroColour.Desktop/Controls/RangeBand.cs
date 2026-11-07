@@ -174,12 +174,13 @@ public sealed class RangeBand : Control
             g.EndFigure(isClosed: true);
         }
         context.DrawGeometry(new ImmutableSolidColorBrush(foreground, 0.16),
-            new Pen(new ImmutableSolidColorBrush(foreground, 0.85), 1.4, lineJoin: PenLineJoin.Round), shape);
+            new Pen(new ImmutableSolidColorBrush(foreground, 0.45), 1.4, lineJoin: PenLineJoin.Round), shape);
         context.DrawRectangle(new Pen(new ImmutableSolidColorBrush(foreground, 0.25), 1),
             new Rect(Math.Round(plot.X) + 0.5, Math.Round(plot.Y) + 0.5, Math.Round(plot.Width), Math.Round(plot.Height)));
 
-        var fill = new ImmutableSolidColorBrush(foreground);
-        var outline = new Pen(new ImmutableSolidColorBrush(Colors.Black, 0.5), 1);
+        // Grey rather than the full foreground colour, which is harsh against the ramp.
+        var fill = new ImmutableSolidColorBrush(foreground, 0.5);
+        var outline = new Pen(new ImmutableSolidColorBrush(foreground, 0.25), 1);
         foreach (var part in new[] { Part.Low, Part.High, Part.LowFeather, Part.HighFeather })
         {
             double radius = part == _drag ? HandleRadius + 1.5 : HandleRadius;
