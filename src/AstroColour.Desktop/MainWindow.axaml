@@ -392,6 +392,10 @@
                                                         RangeChanged="HueRangeBand_RangeChanged" DragStarted="SelectionDrag_Started" DragCompleted="SelectionDrag_Completed"
                                                         ResetRequested="HueRangeBand_ResetRequested"
                                                         ToolTip.Tip="Drag the middle to move the selection, the top corners to set its width and the bottom corners to feather it. Double-click to reset." />
+                                    <controls:LabeledSlider x:Name="MaskBlurSlider" Label="Blur mask" Minimum="0" Maximum="200" DefaultValue="0" Unit=" px"
+                                                            Margin="0,8,0,0" ValueChanged="EditorSlider_ValueChanged"
+                                                            DragStarted="SelectionDrag_Started" DragCompleted="SelectionDrag_Completed"
+                                                            ToolTip.Tip="Softens the selection by blurring it, in pixels of the full-size image, so the change spreads smoothly across colour boundaries instead of following every noisy pixel." />
 
                                     <Expander x:Name="RefineExpander" Header="Refine brightness and neutrals" HorizontalAlignment="Stretch"
                                               Margin="0,8,0,0" Expanded="RefineExpander_Expanded">

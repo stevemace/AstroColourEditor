@@ -52,6 +52,9 @@ public partial class MainWindow : Window
     private PreviewLayer? _proxy;
     private int _proxyFactor = 1;
 
+    /// <summary>Blurred selection masks kept between renders, and for saving.</summary>
+    private readonly MaskCache _maskCache = new();
+
     // Statistics of the full-resolution image's channels for narrowband normalisation (colour images only).
     private ChannelStatistics? _channelStatistics;
 
@@ -258,6 +261,7 @@ public partial class MainWindow : Window
             CompareButton.IsChecked = false;
             if (!image.IsColour) EditorTabs.SelectedItem = GlobalTab;
 
+            _maskCache.Clear();
             _full = new PreviewLayer(rgb);
             _proxy = proxy is null ? null : new PreviewLayer(proxy);
             _proxyFactor = factor;
@@ -359,7 +363,8 @@ public partial class MainWindow : Window
             var narrowband = Narrowband;
             var savedState = _history.Current;
             await Task.Run(() => AstroImageFile.Save(image, target,
-                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband, removePurple, hueCurves), rotation, crop));
+                ColourProcessor.Apply(image, snapshot, curves, stars, saturation, narrowband, removePurple, hueCurves, _maskCache),
+                rotation, crop));
             _path = target;
             if (savedState is not null) _savedStateId = savedState.ContentId;
             // Saved PNG and JPEG files can't be opened again, so only the folder is remembered for those.
@@ -520,6 +525,7 @@ public partial class MainWindow : Window
                     : PreviewMode.Adjusted;
 
                 bool showClipping = ClippingButton.IsChecked == true;
+                float pixelScale = layer == full ? 1 : _proxyFactor;
 
                 var cancellation = new CancellationTokenSource();
                 if (layer == full) _fullRenderCancellation = cancellation;
@@ -527,7 +533,8 @@ public partial class MainWindow : Window
                 try
                 {
                     clipped = await Task.Run(() => ColourProcessor.RenderPreview(layer.Source, snapshot, curves, mode, mask, layer.Pixels,
-                        cancellation.Token, stars, saturation, narrowband, removePurple, hueCurves, showClipping));
+                        cancellation.Token, stars, saturation, narrowband, removePurple, hueCurves, showClipping,
+                        pixelScale, _maskCache));
                 }
                 catch (OperationCanceledException)
                 {
@@ -866,6 +873,7 @@ public partial class MainWindow : Window
         _suppressEditorEvents = true;
         var m = item.Model;
         ProtectSlider.Value = m.NeutralProtection;
+        MaskBlurSlider.Value = m.MaskBlur;
         HueShiftSlider.Value = m.HueShift;
         SaturationSlider.Value = m.Saturation;
         LightnessSlider.Value = m.Lightness;
@@ -918,6 +926,7 @@ public partial class MainWindow : Window
         var m = item.Model;
         bool hadEdits = m.HasEdits;
         m.NeutralProtection = (float)ProtectSlider.Value;
+        m.MaskBlur = (float)MaskBlurSlider.Value;
         m.HueShift = (float)HueShiftSlider.Value;
         m.Saturation = (float)SaturationSlider.Value;
         m.Lightness = (float)LightnessSlider.Value;

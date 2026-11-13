@@ -37,6 +37,16 @@ public sealed class ColourAdjustment
     /// <summary>Width, as a percentage of luminance, of the falloff beyond the luminance limits.</summary>
     public float LightnessSmoothness { get; set; } = 10f;
 
+    /// <summary>
+    /// Blur radius, in pixels of the full-size image, applied to the selection mask before it is used. At 0 each
+    /// pixel is judged by its own colour alone; above 0 the selection spreads smoothly into neighbouring pixels,
+    /// which avoids hard or noisy edges where the colour changes.
+    /// </summary>
+    public float MaskBlur { get; set; }
+
+    /// <summary>The largest <see cref="MaskBlur"/>.</summary>
+    public const float MaxMaskBlur = 200f;
+
     /// <summary>Hue rotation in degrees.</summary>
     public float HueShift { get; set; }
 

@@ -97,6 +97,9 @@ public sealed class NarrowbandNormalization
     private readonly float[] _background = [0, 0, 0], _midtones = [0.5f, 0.5f, 0.5f], _boost = [1, 1, 1];
     private readonly int _hAlpha;
 
+    /// <summary>The settings this normalisation was made from.</summary>
+    public NarrowbandSettings Settings => _settings;
+
     public NarrowbandNormalization(NarrowbandSettings settings, ChannelStatistics statistics)
     {
         _settings = settings;

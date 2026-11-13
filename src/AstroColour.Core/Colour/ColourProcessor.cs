@@ -40,7 +40,7 @@ public static class ColourProcessor
     public static ClippingStats RenderPreview(RgbImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves,
         PreviewMode mode, ColourAdjustment? mask, byte[] bgra, CancellationToken cancellation = default, StarLayer? stars = null,
         float saturation = 0f, NarrowbandNormalization? narrowband = null, float removePurple = 0f, HueCurveSet? hueCurves = null,
-        bool showClipping = false)
+        bool showClipping = false, float pixelScale = 1f, MaskCache? maskCache = null)
     {
         var baseAdjustments = mode == PreviewMode.Original ? null
             : BaseAdjustments.Create(narrowband, curves is null ? null : new CurveLookup(curves), saturation, removePurple,
@@ -54,6 +54,10 @@ public static class ColourProcessor
 
         float[] rp = image.R, gp = image.G, bp = image.B;
         int width = image.Width;
+        string? baseKey = maskCache is not null && (set.NeedsMasks || maskSet is { NeedsMasks: true })
+            ? MaskCache.BaseKey(baseAdjustments?.Narrowband, curves, saturation, removePurple, hueCurves) : null;
+        set.BuildMasks(rp, gp, bp, width, image.Height, baseAdjustments, pixelScale, cancellation, maskCache, rp, baseKey);
+        maskSet?.BuildMasks(rp, gp, bp, width, image.Height, baseAdjustments, pixelScale, cancellation, maskCache, rp, baseKey);
         var options = new ParallelOptions { CancellationToken = cancellation };
         bool clipping = showClipping && mode == PreviewMode.Adjusted;
         long shadowCount = 0, highlightCount = 0;
@@ -71,8 +75,8 @@ public static class ColourProcessor
                 if (maskSet is not null)
                 {
                     float cr = Math.Clamp(r, 0f, 1f), cg = Math.Clamp(g, 0f, 1f), cb = Math.Clamp(b, 0f, 1f);
-                    set.Adjust(ref r, ref g, ref b);
-                    float w = maskSet.WeightOfColour(cr, cg, cb);
+                    set.Adjust(ref r, ref g, ref b, i);
+                    float w = maskSet.MaskWeight(i, cr, cg, cb);
                     float grey = ColourMath.Luminance(cr, cg, cb);
                     r = grey + (r - grey) * w;
                     g = grey + (g - grey) * w;
@@ -80,7 +84,7 @@ public static class ColourProcessor
                 }
                 else
                 {
-                    set.Adjust(ref r, ref g, ref b);
+                    set.Adjust(ref r, ref g, ref b, i);
                     if (clipping)
                     {
                         int flags = ClipFlags(rp[i], r) | ClipFlags(gp[i], g) | ClipFlags(bp[i], b);
@@ -120,7 +124,7 @@ public static class ColourProcessor
     /// <param name="removePurple">How far green moves towards the red/blue average, 0–1.</param>
     public static float[][] Apply(IAstroImage image, IReadOnlyList<ColourAdjustment> adjustments, CurveSet? curves = null,
         StarLayer? stars = null, float saturation = 0f, NarrowbandNormalization? narrowband = null, float removePurple = 0f,
-        HueCurveSet? hueCurves = null)
+        HueCurveSet? hueCurves = null, MaskCache? maskCache = null)
     {
         var planes = image.Planes.Select(p => (float[])p.Clone()).ToArray();
         var lookup = curves is null ? null : new CurveLookup(curves, monochrome: !image.IsColour);
@@ -152,6 +156,11 @@ public static class ColourProcessor
         if (baseAdjustments is null && set.IsEmpty && stars is null) return planes;
 
         float[] rp = planes[0], gp = planes[1], bp = planes[2];
+        // Keyed on the image's own planes (these are copies), which a full-size preview shares, so its masks are reused.
+        string? baseKey = maskCache is not null && set.NeedsMasks
+            ? MaskCache.BaseKey(baseAdjustments?.Narrowband, curves, saturation, removePurple, hueCurves) : null;
+        set.BuildMasks(rp, gp, bp, width, image.Height, baseAdjustments, cancellation: default, cache: maskCache,
+            source: image.Planes[0], baseKey: baseKey);
         Parallel.For(0, image.Height, [MethodImpl(MethodImplOptions.AggressiveOptimization)] (int y) =>
         {
             int row = y * width;
@@ -160,7 +169,7 @@ public static class ColourProcessor
                 float r = rp[i], g = gp[i], b = bp[i];
                 bool changed = baseAdjustments is not null;
                 baseAdjustments?.Apply(ref r, ref g, ref b);
-                changed |= set.Adjust(ref r, ref g, ref b);
+                changed |= set.Adjust(ref r, ref g, ref b, i);
                 if (stars is not null)
                 {
                     stars.Apply(i, ref r, ref g, ref b);
