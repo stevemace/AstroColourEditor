@@ -17,22 +17,7 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    asks for a new file (TIFF by default). Raw files open on Windows and Linux; macOS needs LibRaw bundled (not done yet).
    The arrow beside **Open** lists the last ten files opened (also on the start screen, and under File > Open Recent
    on a Mac). File dialogs start in the open file's folder, or else the folder last opened from or saved to.
-2. Turn on **Pick colour from image** (P) and click a colour in the image. A new entry appears in the list.
-3. Under **Edit with**, choose **HSL** to adjust that colour's **Hue**, **Saturation** and **Lightness**, or
-   **Curves** to shape its tones with RGB / Red / Green / Blue curves drawn over a histogram of just the selected
-   colours. Similar hues are adjusted too, fading out smoothly. A colour can use both; curves apply after the HSL changes.
-4. Refine which colours are affected under **Which colours**:
-   - The hue band shows the selection over the image's hues. Drag its middle to move it, the top corners to set its
-     width and the bottom corners to feather it; click elsewhere on the band to move it there, or double-click to reset.
-   - **Shift-click** a colour in the image to add it to the selected entry, or **Alt-click** (Option-click on a Mac) to
-     leave it out; the selection grows or shrinks on that colour's side.
-   - The selected colours show (everything else greyed out) while you drag these controls, or while you hold **M**.
-   - **Refine brightness and neutrals** (opened automatically when an entry uses it) has a brightness band that limits
-     the selection to colours between a darkest and brightest luminance (how bright they look, so dim blue counts as
-     dark), drawn over a histogram of the selected hue, and **Protect neutrals**, which leaves near-grey pixels
-     (background, white stars) alone.
-5. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider (or its label) to reset it.
-6. The **Global** tab edits the whole image:
+2. The **Global** tab edits the whole image:
    - **Narrowband normalisation** (colour images; applied first, before everything else) balances a narrowband
      image whose strong Hα signal swamps the other channels, after Bill Blanshan's PixelMath. Choose **SHO** (SII red,
      Hα green, OIII blue) or **HOO** (Hα red, OIII green and blue). As in PixInsight's NarrowbandNormalization (shadow point 1),
@@ -59,6 +44,26 @@ Shortcuts below are for Windows; on a Mac use ⌘ in place of Ctrl.
    The edits apply in this order: narrowband normalisation, curves, saturation, remove purple, hue curves, the colour editor,
    then stars. The colour editor's picker, its selected range and its curves' histogram see the image after
    the Global tab's edits.
+3. On the **Colour** tab, turn on **Pick colour from image** (P) and click a colour in the image. A new entry appears in the list.
+4. Under **Edit with**, choose **HSL** to adjust that colour's **Hue**, **Saturation** and **Lightness**, or
+   **Curves** to shape its tones with RGB / Red / Green / Blue curves drawn over a histogram of just the selected
+   colours. Similar hues are adjusted too, fading out smoothly. A colour can use both; curves apply after the HSL changes.
+5. Refine which colours are affected under **Which colours**:
+   - The hue band shows the selection over the image's hues. Drag its middle to move it, the top corners to set its
+     width and the bottom corners to feather it; click elsewhere on the band to move it there, or double-click to reset.
+   - **Blur mask** (0–200 px) softens the selection. Normally each pixel is judged by its own colour alone, so the
+     edit follows every noisy pixel and can leave hard edges where one colour meets another. With a blur, the mask of
+     how strongly each pixel is selected is blurred before it's used, so the edit spreads smoothly into neighbouring
+     pixels, including near-grey ones beside the selected colour. The radius is in pixels of the full-size image, so the
+     reduced-resolution preview and the saved image match. Drag the slider to watch the blurred mask.
+   - **Shift-click** a colour in the image to add it to the selected entry, or **Alt-click** (Option-click on a Mac) to
+     leave it out; the selection grows or shrinks on that colour's side.
+   - The selected colours show (everything else greyed out) while you drag these controls, or while you hold **M**.
+   - **Refine brightness and neutrals** (opened automatically when an entry uses it) has a brightness band that limits
+     the selection to colours between a darkest and brightest luminance (how bright they look, so dim blue counts as
+     dark), drawn over a histogram of the selected hue, and **Protect neutrals**, which leaves near-grey pixels
+     (background, white stars) alone.
+6. Pick more colours as needed. Each entry can be toggled or deleted, and you can double-click any slider (or its label) to reset it.
 7. On the **Stars** tab, **Add stars image…** loads a stars-only image (e.g. from StarXTerminator) the same size as
    the open (starless) image and adds it back with the pixel math `~((~starless) * (~(stars * x)))`. The
    **Star brightness (x)** slider (0–1) sets how bright the stars are. Stars go on after the colour editor and
